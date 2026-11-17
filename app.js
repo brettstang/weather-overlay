@@ -129,20 +129,6 @@ const todayIdx = () => Math.max(0, Math.min(S.data.dates.length - 1, Math.floor(
 const visible = () => S.data ? S.data.order.filter(id => S.shown.has(id)) : [];
 const modelIds = ids => ids.filter(id => id !== "blend");
 
-function applyPreset(p) {
-  const all = MODELS.map(m => m.id);
-  const pick = {
-    core: CORE_MODELS,
-    global: MODELS.filter(m => m.kind === "global" || m.kind === "ai").map(m => m.id),
-    regional: MODELS.filter(m => m.kind === "regional").map(m => m.id),
-    all, none: []
-  }[p] || all;
-  S.shown = new Set(p === "none" ? [] : ["blend", ...pick]);
-  S.preset = p;
-  saveShown();
-}
-function saveShown() { LS.set("shown", [...S.shown]); LS.set("preset", S.preset); }
-
 // ---------- Window (selected days) ----------
 function windowSeries() {
   const D = S.data, ws = S.start * 1440, span = S.range * 1440;
@@ -255,39 +241,51 @@ function dayExt(i) {
   return hi && { hi: hi.v, hiM: hi.m, lo: lo.v, loM: lo.m };
 }
 
+function chartTitle() {
+  const D = S.data, t = todayIdx();
+  if (S.range === 1) {
+    const i = S.start, tag = i === t ? `<span class="tag">Today</span>` : i === t + 1 ? `<span class="tag">Tomorrow</span>` : i < t ? `<span class="tag past">Past</span>` : "";
+    return `${dayLong(D.dates[i])}${tag}`;
+  }
+  return `${dayShort(D.dates[S.start])} – ${dayShort(D.dates[S.start + S.range - 1])}${S.start <= t && t < S.start + S.range ? `<span class="tag">incl. today</span>` : ""}`;
+}
 function summaryHTML() {
   const D = S.data, U = `°${S.unit}`;
   if (S.range === 1) {
-    const i = S.start, d = D.dates[i], e = dayExt(i), src = "Model mean";
-    const highs = modelIds(visible()).map(id => D.daily[id][i]).filter(Boolean);
-    const span = highs.length > 1 ? ` · models <span class="hi">${fmt(cv(Math.min(...highs.map(h => h.hi))))}–${fmt(cv(Math.max(...highs.map(h => h.hi))))}°</span> / <span class="lo">${fmt(cv(Math.min(...highs.map(h => h.lo))))}–${fmt(cv(Math.max(...highs.map(h => h.lo))))}°</span>` : "";
-    const tag = i === todayIdx() ? "Today" : i === todayIdx() + 1 ? "Tomorrow" : i < todayIdx() ? "Past" : "";
-    return `<b>${dayLong(d)}</b>${tag ? ` · ${tag}` : ""}${e ? ` · ${src} high <b class="hi">${fmt(cv(e.hi))}${U}</b> at ${hhmm(e.hiM - i * 1440)}, low <b class="lo">${fmt(cv(e.lo))}${U}</b> at ${hhmm(e.loM - i * 1440)}` : ""}${span}`;
+    const i = S.start, e = dayExt(i);
+    const days = modelIds(visible()).map(id => D.daily[id][i]).filter(Boolean);
+    const dis = days.length > 1 ? ` · models differ by <b>${fmt(cv(Math.max(...days.map(d => d.hi))) - cv(Math.min(...days.map(d => d.hi))))}°</b> on the high` : "";
+    return e ? `Avg high <b class="hi">${fmt(cv(e.hi))}${U}</b> ${hhmm(e.hiM - i * 1440)} · low <b class="lo">${fmt(cv(e.lo))}${U}</b> ${hhmm(e.loM - i * 1440)}${dis}` : "Not enough model data for this day.";
   }
-  const a = D.dates[S.start], b = D.dates[S.start + S.range - 1];
   const v = windowSeries().flatMap(s => s.pts.map(p => p.v));
-  return `<b>${dayShort(a)} – ${dayShort(b)}</b> · ${S.range} days${v.length ? ` · models range <b class="lo">${fmt(Math.min(...v))}°</b> to <b class="hi">${fmt(Math.max(...v))}${U}</b>` : ""}`;
+  return v.length ? `Models range <b class="lo">${fmt(Math.min(...v))}°</b> to <b class="hi">${fmt(Math.max(...v))}${U}</b>` : "";
 }
 
-// ---------- Readout (crosshair) ----------
+// ---------- Readout (doubles as the legend) ----------
 function valueAt(G, id, minute) { const s = G.series.find(s => s.id === id); return s ? s.pts.find(p => p.m === minute) || null : null; }
 function readoutHTML(G, minute) {
-  if (!G) return "";
-  const U = `°${S.unit}`;
-  if (S.sel) {
-    const p = valueAt(G, S.sel, minute), m = META(S.sel);
-    return p ? `<div><span class="rdot" style="background:${colorOf(S.sel)}"></span><b>${esc(m.short)}</b> at <b>${hhmm(minute, G.multi)}</b> <span class="rbig">${fmt(p.v)}${U}</span></div><small style="color:var(--faint)">${esc(m.name)} · ${esc(m.res)} · tap the name again to see all</small>`
-             : `<b>${esc(m.short)}</b> has no value at ${hhmm(minute, G.multi)} (outside its forecast range).`;
-  }
-  const rows = G.series.map(s => ({ id: s.id, p: s.pts.find(p => p.m === minute) })).filter(r => r.p).sort((a, b) => b.p.v - a.p.v);
-  const mv = rows.filter(r => r.id !== "blend").map(r => r.p.v);
+  if (!G) return `<div class="rempty">No models are switched on.<br><button class="btn" data-open-models style="margin:10px auto 0">Choose models</button></div>`;
+  const U = `°${S.unit}`, D = S.data;
+  const rows = G.series.map(s => ({ id: s.id, p: s.pts.find(p => p.m === minute) }));
+  rows.sort((a, b) => (b.p ? b.p.v : -1e9) - (a.p ? a.p.v : -1e9));
+  const mv = rows.filter(r => r.p).map(r => r.p.v);
   const mean = mv.length ? mv.reduce((a, b) => a + b, 0) / mv.length : null;
-  return `<div class="rhead"><span>${hhmm(minute, G.multi)} local</span><small>${S.range === 1 ? dayShort(S.data.dates[S.start]) : ""}</small></div>
-    <div class="rgrid">${rows.map(r => `<span title="${esc(META(r.id).name)}"><span class="rdot" style="background:${colorOf(r.id)}"></span>${esc(META(r.id).short)}</span><b>${fmt(r.p.v)}${U}</b>`).join("")}</div>
-    ${mv.length > 1 ? `<div class="rstats"><span>Mean <b>${fmt(mean)}°</b></span><span>Spread <b>${fmt(Math.max(...mv) - Math.min(...mv))}°</b></span><span>Models <b>${mv.length}</b></span></div>` : ""}`;
+  let sel = "";
+  if (S.sel) {
+    const m = META(S.sel), p = valueAt(G, S.sel, minute), di = S.start + Math.floor(minute / 1440), e = D.daily[S.sel]?.[Math.min(di, D.dates.length - 1)];
+    sel = `<div class="rsel"><span class="rdot" style="background:${colorOf(S.sel)}"></span><b>${esc(m.name)}</b>
+      <div class="rbig">${p ? fmt(p.v) + U : "—"}</div>
+      <small>${esc(m.provider)} · ${esc(m.res)} grid${p ? "" : " · no data at this hour"}</small>
+      ${e ? `<div class="rhl"><span>Day high <b style="color:#ffb38a">${fmt(cv(e.hi))}°</b> at ${pad(Math.floor(e.hiM / 60) % 24)}:00</span><span>Low <b style="color:#8fd3ff">${fmt(cv(e.lo))}°</b> at ${pad(Math.floor(e.loM / 60) % 24)}:00</span></div>` : ""}</div>`;
+  }
+  return `<div class="rhead"><b>${hhmm(minute, G.multi)}</b><small>${mv.length > 1 ? `avg <b>${fmt(mean)}°</b> · spread <b>${fmt(Math.max(...mv) - Math.min(...mv))}°</b>` : "local time"}</small></div>
+    ${sel}<div class="rlist">${rows.map(r => `<button class="rrow${S.sel === r.id ? " sel" : S.sel ? " dim" : ""}" data-id="${r.id}" title="${esc(META(r.id).name)}">
+      <i class="rdot" style="background:${colorOf(r.id)}"></i><span>${esc(META(r.id).short)}</span><b>${r.p ? fmt(r.p.v) + "°" : "–"}</b></button>`).join("")}</div>`;
 }
 function drawCrosshair(scope, minute) {
-  const G = scope._G; if (!G) return;
+  const G = scope._G;
+  const ro = scope.querySelector(".readout");
+  if (!G) { if (ro) ro.innerHTML = readoutHTML(null); return; }
   S.min = minute;
   const { x, y, T, H, B } = G;
   const ids = S.sel ? [S.sel] : G.series.map(s => s.id);
@@ -295,58 +293,79 @@ function drawCrosshair(scope, minute) {
   for (const id of ids) { const p = valueAt(G, id, minute); if (p) dots += `<circle cx="${x(p.m)}" cy="${y(p.v)}" r="${S.sel ? 5 : 3.2}" fill="${colorOf(id)}" stroke="#0a0e22" stroke-width="1.5"/>`; }
   const xh = scope.querySelector(".xh");
   if (xh) xh.innerHTML = `<line x1="${x(minute)}" x2="${x(minute)}" y1="${T}" y2="${H - B}" stroke="rgba(255,255,255,.6)"/>${dots}`;
-  const ro = scope.querySelector(".readout");
-  if (ro) { ro.classList.remove("empty"); ro.innerHTML = readoutHTML(G, minute); }
+  if (ro) ro.innerHTML = readoutHTML(G, minute);
 }
 function defaultMinute() {
   const span = S.range * 1440, nm = nowMin() - S.start * 1440;
   if (nm >= 0 && nm < span) return Math.round(nm / 60) * 60;
-  if (S.range === 1) { const e = dayExt(S.start); if (e) return e.hiM - S.start * 1440; return 720; }
+  if (S.range === 1) { const e = dayExt(S.start); if (e) return e.hiM - S.start * 1440; }
   return 720;
 }
 function applyHighlight(scope) {
   scope.querySelectorAll("[data-line]").forEach(el => {
     const k = el.getAttribute("data-line");
     el.style.opacity = !S.sel || k === S.sel ? "" : ".12";
-    el.setAttribute("stroke-width", S.sel && k === S.sel ? "3.4" : k === "blend" ? "1.8" : "1.7");
+    el.setAttribute("stroke-width", S.sel && k === S.sel ? "3.4" : "1.7");
   });
-  scope.querySelectorAll(".li").forEach(li => { li.classList.toggle("sel", li.dataset.id === S.sel); li.classList.toggle("dim", !!S.sel && li.dataset.id !== S.sel); });
+}
+function scopes() { return [$("view"), document.querySelector(".fsbox")].filter(Boolean); }
+function selectModel(id) {
+  S.sel = S.sel === id ? "" : id;
+  for (const sc of scopes()) { applyHighlight(sc); drawCrosshair(sc, S.min); }
 }
 
-// ---------- Legend ----------
-function legendHTML() {
-  const D = S.data, i = S.start;
-  const val = id => {
-    if (S.range === 1) { const e = D.daily[id][i]; return e ? `<span class="h">${fmt(cv(e.hi))}°</span><span class="l">${fmt(cv(e.lo))}°</span>` : `<span class="l" style="color:var(--faint)">partial</span>`; }
-    const p = D.pts[id].filter(p => p.m >= i * 1440 && p.m <= (i + S.range) * 1440).map(p => cv(p.v));
-    return p.length ? `<span class="h">${fmt(Math.max(...p))}°</span><span class="l">${fmt(Math.min(...p))}°</span>` : "";
-  };
-  const item = id => { const m = META(id); return `<div class="li${S.shown.has(id) ? " on" : ""}" data-id="${id}" role="button" tabindex="0">
-      <button class="eye" style="color:${colorOf(id)}" aria-label="${S.shown.has(id) ? "Hide" : "Show"} ${esc(m.short)}"><i></i></button>
-      <div class="nm"><span>${esc(m.short)}</span><small>${esc(id === "blend" ? m.name : `${m.provider} · ${m.res}`)}</small></div>
-      <div class="v">${val(id)}</div></div>`; };
-  let html = D.pts.blend ? item("blend") : "", lastProv = "";
-  for (const id of D.order) {
-    if (id === "blend") continue;
-    const p = MODEL_BY_ID[id].provider;
-    if (p !== lastProv) { html += `<div class="lgrp">${esc(p)}</div>`; lastProv = p; }
-    html += item(id);
+// ---------- Models sheet ----------
+function presetIds(p) {
+  return { core: CORE_MODELS,
+           global: MODELS.filter(m => m.kind === "global" || m.kind === "ai").map(m => m.id),
+           regional: MODELS.filter(m => m.kind === "regional").map(m => m.id),
+           all: MODELS.map(m => m.id) }[p] || [];
+}
+function applyPreset(p) { S.shown = new Set(presetIds(p)); S.preset = p; saveShown(); }
+function saveShown() { LS.set("shown", [...S.shown]); LS.set("preset", S.preset); }
+function renderModelsSheet() {
+  const D = S.data; if (!D) return;
+  const avail = D.order, on = avail.filter(id => S.shown.has(id)).length;
+  $("scount").textContent = `${on} of ${avail.length} on`;
+  document.querySelectorAll("#mpresets button").forEach(b => b.classList.toggle("on", b.dataset.p === S.preset));
+  const i = S.start;
+  let html = "", prov = "";
+  for (const id of avail) {
+    const m = MODEL_BY_ID[id];
+    if (m.provider !== prov) {
+      prov = m.provider;
+      const grp = avail.filter(x => MODEL_BY_ID[x].provider === prov), allOn = grp.every(x => S.shown.has(x));
+      html += `<div class="mgrp"><span>${esc(prov)}</span>${grp.length > 1 ? `<button data-grp="${esc(prov)}" data-on="${allOn ? 0 : 1}">${allOn ? "Hide all" : "Show all"}</button>` : ""}</div>`;
+    }
+    const e = D.daily[id][i];
+    html += `<label class="mrow"><i style="background:${m.color}"></i><span class="mn"><b>${esc(m.short)}</b><small>${esc(m.name)} · ${esc(m.res)}</small></span>
+      ${e ? `<span class="mhl"><span class="h">${fmt(cv(e.hi))}°</span><span class="l">${fmt(cv(e.lo))}°</span></span>` : ""}
+      <input type="checkbox" class="sw" data-id="${id}"${S.shown.has(id) ? " checked" : ""} aria-label="Show ${esc(m.short)}"></label>`;
   }
-  return html;
+  const keep = $("mlist").scrollTop;
+  $("mlist").innerHTML = html;
+  $("mlist").scrollTop = keep;
 }
-function legendTitle() {
-  const n = S.data.order.length - (S.data.pts.blend ? 1 : 0), on = modelIds(visible()).length;
-  return `<span>${S.range === 1 ? "Day high / low" : "Range high / low"}</span><span>${on} of ${n} models</span>`;
+function renderToolbar() {
+  const ids = modelIds(visible());
+  $("mcount").textContent = ids.length;
+  $("mdots").innerHTML = ids.slice(0, 4).map(id => `<i style="background:${colorOf(id)}"></i>`).join("");
+  $("optsBtn").classList.toggle("active", S.lines.low != null || S.lines.high != null);
+  document.querySelectorAll("#range button").forEach(b => b.classList.toggle("on", +b.dataset.r === S.range));
+  document.querySelectorAll(".unit button").forEach(b => b.classList.toggle("on", b.dataset.unit === S.unit));
+  $("prevBtn").disabled = S.start <= 0;
+  $("nextBtn").disabled = S.start + S.range >= S.data.dates.length;
 }
+function openModal(id) { $(id).hidden = false; document.body.classList.add("fs-open"); }
+function closeModal(id) { $(id).hidden = true; if (!document.querySelector(".modal:not([hidden])") && !document.querySelector(".fs")) document.body.classList.remove("fs-open"); }
 
 // ---------- Day strip & table ----------
 function renderDays() {
   const D = S.data, t = todayIdx();
   $("days").innerHTML = D.dates.map((d, i) => {
     const e = dayExt(i), inR = i >= S.start && i < S.start + S.range;
-    const tag = i === t ? "<em>Today</em>" : "";
-    return `<button class="day${i < t ? " past" : ""}${inR ? " in" : ""}${i === S.start && S.range > 1 ? " first" : ""}" data-i="${i}" role="tab" aria-selected="${inR}">
-      <div class="dn"><span>${WD[dObj(d).getUTCDay()]}</span>${tag}</div><div class="dt">${MO[dObj(d).getUTCMonth()]} ${dObj(d).getUTCDate()}</div>
+    return `<button class="day${i < t ? " past" : ""}${inR ? " in" : ""}" data-i="${i}" role="tab" aria-selected="${inR}">
+      <div class="dn"><span>${i === t ? "Today" : WD[dObj(d).getUTCDay()]}</span></div><div class="dt">${MO[dObj(d).getUTCMonth()]} ${dObj(d).getUTCDate()}</div>
       <div class="hl">${e ? `<span class="h">${Math.round(cv(e.hi))}°</span> <span class="l">${Math.round(cv(e.lo))}°</span>` : "&nbsp;"}</div></button>`;
   }).join("");
 }
@@ -363,17 +382,17 @@ function renderTable() {
       const es = mids.map(id => D.daily[id][i]).filter(Boolean);
       return `<td class="${cls(i)}">${es.length > 1 ? f(es) : "–"}</td>`; }).join("")}</tr>`;
     const mean = a => a.reduce((s, b) => s + b, 0) / a.length;
-    h += stat("Model mean", es => `<span class="h">${fmt(cv(mean(es.map(e => e.hi))))}</span><br><span class="l">${fmt(cv(mean(es.map(e => e.lo))))}</span>`);
+    h += stat("Average", es => `<span class="h">${fmt(cv(mean(es.map(e => e.hi))))}</span><br><span class="l">${fmt(cv(mean(es.map(e => e.lo))))}</span>`);
     const k = S.unit === "F" ? 1.8 : 1;
-    h += stat("Model spread", es => `${fmt((Math.max(...es.map(e => e.hi)) - Math.min(...es.map(e => e.hi))) * k)}<br>${fmt((Math.max(...es.map(e => e.lo)) - Math.min(...es.map(e => e.lo))) * k)}`);
+    h += stat("Spread", es => `${fmt((Math.max(...es.map(e => e.hi)) - Math.min(...es.map(e => e.hi))) * k)}<br>${fmt((Math.max(...es.map(e => e.lo)) - Math.min(...es.map(e => e.lo))) * k)}`);
   }
   $("table").innerHTML = h + "</tbody></table>";
 }
 
 // ---------- Render ----------
 function chartDims(el) {
-  const W = Math.max(320, Math.round(el.clientWidth || 340));
-  const H = W < 600 ? Math.round(Math.max(250, W * 0.72)) : Math.round(Math.min(520, Math.max(300, W * 0.5)));
+  const W = Math.max(300, Math.round(el.clientWidth || 340));
+  const H = W < 600 ? Math.round(Math.max(240, W * 0.7)) : Math.round(Math.min(500, Math.max(300, W * 0.48)));
   return { W, H };
 }
 function renderMain() {
@@ -381,9 +400,8 @@ function renderMain() {
   const { W, H } = chartDims(host);
   const { svg, G } = chartSVG(W, H);
   host.innerHTML = svg; scope._G = G;
+  $("ctitle").innerHTML = chartTitle();
   $("gsum").innerHTML = summaryHTML();
-  $("legendTitle").innerHTML = legendTitle();
-  $("legend").innerHTML = legendHTML();
   if (S.min == null || S.min > S.range * 1440) S.min = defaultMinute();
   drawCrosshair(scope, S.min);
   applyHighlight(scope);
@@ -391,33 +409,29 @@ function renderMain() {
 }
 function renderAll() {
   if (!S.data) return;
-  renderHeader(); renderDays(); renderMain(); renderTable();
-  document.querySelectorAll("#range button").forEach(b => b.classList.toggle("on", +b.dataset.r === S.range));
-  document.querySelectorAll("#presets button").forEach(b => b.classList.toggle("on", b.dataset.p === S.preset));
-  document.querySelectorAll(".unit button").forEach(b => b.classList.toggle("on", b.dataset.unit === S.unit));
-  $("spreadBtn").setAttribute("aria-pressed", S.spread);
-  $("linesBtn").classList.toggle("on", S.lines.low != null || S.lines.high != null);
+  if (S.sel && !visible().includes(S.sel)) S.sel = "";
+  renderHeader(); renderDays(); renderToolbar(); renderMain(); renderTable();
+  if (!$("modelsModal").hidden) renderModelsSheet();
 }
 function renderHeader() {
   const D = S.data, L = S.loc;
   $("locName").textContent = L.name;
   const ns = D.lat >= 0 ? "N" : "S", ew = D.lon >= 0 ? "E" : "W";
   const where = [L.admin1, L.country].filter(Boolean).join(", ") || "Custom coordinates";
-  const nModels = D.order.length - (D.pts.blend ? 1 : 0);
-  $("locMeta").textContent = `${where ? where + " · " : ""}${Math.abs(D.lat).toFixed(3)}°${ns}, ${Math.abs(D.lon).toFixed(3)}°${ew} · ${Math.round(D.elev ?? 0)} m · ${nModels} models with data`;
+  $("locMeta").textContent = `${where} · ${Math.abs(D.lat).toFixed(2)}°${ns}, ${Math.abs(D.lon).toFixed(2)}°${ew} · ${Math.round(D.elev ?? 0)} m`;
   tickClock();
 }
 function tickClock() {
   if (!S.data) return;
   const t = new Date(Date.now() + S.data.offset * 1000);
-  $("clock").innerHTML = `<b>${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}</b>${WD[t.getUTCDay()]} ${MO[t.getUTCMonth()]} ${t.getUTCDate()} · ${esc(S.data.tzAbbr || S.data.tz || "")}`;
+  $("clock").innerHTML = `<b>${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}</b>${esc(S.data.tzAbbr || S.data.tz || "")} local`;
 }
 
 // ---------- Full-screen chart (drawn sideways on a portrait phone) ----------
 function fsSize() {
   const vw = innerWidth, vh = innerHeight, rot = vh > vw && vw < 760;
   const long = rot ? vh : vw, short = rot ? vw : vh;
-  const panel = Math.min(300, Math.round(long * 0.34));
+  const panel = Math.min(280, Math.round(long * 0.32));
   const W = Math.max(320, long - panel - 60), H = Math.max(200, short - 80);
   return { rot, long, short, W, H };
 }
@@ -428,9 +442,9 @@ function renderFS(box) {
   const { svg, G } = chartSVG(z.W, z.H);
   box._G = G;
   box.innerHTML = `<button class="fsx" aria-label="Close">✕</button>
-    <div class="fsl"><div class="fsc"><div class="gsum">${esc(S.loc.name)} · ${summaryHTML()}</div><div class="chart">${svg}</div></div>
-    <div class="fsp"><div class="readout"></div><div class="glh">${legendTitle()}</div><div class="legend">${legendHTML()}</div></div></div>`;
-  if (S.min != null) drawCrosshair(box, S.min);
+    <div class="fsl"><div class="fsc"><div class="gsum"><b>${esc(S.loc.name)}</b> · ${chartTitle().replace(/<span class="tag[^>]*>.*?<\/span>/g, "")} · ${summaryHTML()}</div><div class="chart">${svg}</div></div>
+    <div class="fsp"><div class="readout"></div></div></div>`;
+  drawCrosshair(box, S.min ?? defaultMinute());
   applyHighlight(box);
 }
 function openFS() {
@@ -441,7 +455,7 @@ function openFS() {
   document.body.classList.add("fs-open");
   renderFS(fs.firstChild);
 }
-function closeFS() { document.querySelector(".fs")?.remove(); document.body.classList.remove("fs-open"); }
+function closeFS() { document.querySelector(".fs")?.remove(); if (!document.querySelector(".modal:not([hidden])")) document.body.classList.remove("fs-open"); }
 
 // ---------- Interaction ----------
 function scopeOf(el) { return el.closest(".fsbox") || $("view"); }
@@ -455,74 +469,68 @@ function pointerToMinute(svg, G, cx, cy) {
 document.addEventListener("pointerdown", e => {
   const svg = e.target.closest?.(".chart svg"); if (!svg) return;
   const scope = scopeOf(svg), G = scope._G; if (!G) return;
-  const move = ev => {
-    const m = pointerToMinute(svg, G, ev.clientX, ev.clientY);
-    drawCrosshair(scope, m);
-    const other = scope.id === "view" ? document.querySelector(".fsbox") : null;
-    if (other) drawCrosshair(other, m);
-  };
+  const move = ev => { const m = pointerToMinute(svg, G, ev.clientX, ev.clientY); if (m !== S.min || ev === e) for (const sc of scopes()) drawCrosshair(sc, m); };
   move(e);
   try { svg.setPointerCapture(e.pointerId); } catch {}
-  const up = () => { svg.removeEventListener("pointermove", move); svg.removeEventListener("pointerup", up); svg.removeEventListener("pointercancel", up); if (scope.id !== "view") { drawCrosshair($("view"), S.min); } };
+  const up = () => { svg.removeEventListener("pointermove", move); svg.removeEventListener("pointerup", up); svg.removeEventListener("pointercancel", up); };
   svg.addEventListener("pointermove", move);
   svg.addEventListener("pointerup", up);
   svg.addEventListener("pointercancel", up);
 });
 document.addEventListener("click", e => {
-  if (e.target.closest(".gexp")) return openFS();
-  if (e.target.closest(".fsx")) return closeFS();
-  const li = e.target.closest(".li");
-  if (li) {
-    const id = li.dataset.id;
-    if (e.target.closest(".eye")) {
-      S.shown.has(id) ? S.shown.delete(id) : S.shown.add(id);
-      if (!S.shown.has(id) && S.sel === id) S.sel = "";
-      S.preset = "custom"; saveShown(); renderAll(); return;
-    }
-    if (!S.shown.has(id)) { S.shown.add(id); S.preset = "custom"; saveShown(); S.sel = id; renderAll(); return; }
-    S.sel = S.sel === id ? "" : id;
-    for (const sc of [$("view"), document.querySelector(".fsbox")]) if (sc) { applyHighlight(sc); drawCrosshair(sc, S.min); }
-    return;
-  }
-  const day = e.target.closest(".day, .dt thead th[data-i]");
-  if (day) { setStart(+day.dataset.i); return; }
-  const rb = e.target.closest("#range button");
-  if (rb) { S.range = +rb.dataset.r; LS.set("range", S.range); if (S.range === 16 && S.start < todayIdx()) S.start = todayIdx(); setStart(S.start); return; }
-  const pb = e.target.closest("#presets button");
-  if (pb) { applyPreset(pb.dataset.p); if (S.sel && !S.shown.has(S.sel)) S.sel = ""; renderAll(); return; }
-  const ub = e.target.closest(".unit button");
-  if (ub) { S.unit = ub.dataset.unit; LS.set("unit", S.unit); renderAll(); return; }
-  const q = e.target.closest(".quick button");
-  if (q) { const p = QUICK[+q.dataset.i]; loadLocation(p); return; }
+  const t = e.target;
+  if (t.closest(".gexp")) return openFS();
+  if (t.closest(".fsx")) return closeFS();
+  const rr = t.closest(".rrow"); if (rr) return selectModel(rr.dataset.id);
+  if (t.closest("[data-open-models]")) { renderModelsSheet(); return openModal("modelsModal"); }
+  const day = t.closest(".day, .dt thead th[data-i]"); if (day) return setStart(+day.dataset.i);
+  const rb = t.closest("#range button");
+  if (rb) { S.range = +rb.dataset.r; LS.set("range", S.range); if (S.range === 16 && S.start < todayIdx()) S.start = todayIdx(); return setStart(S.start); }
+  const ub = t.closest(".unit button");
+  if (ub) { S.unit = ub.dataset.unit; LS.set("unit", S.unit); return renderAll(); }
+  const q = t.closest(".quick button[data-i]"); if (q) return loadLocation(q.classList.contains("recent") ? LS.get("recent", [])[+q.dataset.i] : QUICK[+q.dataset.i]);
+  const mp = t.closest("#mpresets button"); if (mp) { applyPreset(mp.dataset.p); return renderAll(), renderModelsSheet(); }
+  const mg = t.closest(".mgrp button[data-grp]");
+  if (mg) { const on = mg.dataset.on === "1"; S.data.order.filter(id => MODEL_BY_ID[id].provider === mg.dataset.grp).forEach(id => on ? S.shown.add(id) : S.shown.delete(id)); S.preset = "custom"; saveShown(); return renderAll(), renderModelsSheet(); }
+  const cl = t.closest("[data-close]"); if (cl) return closeModal(cl.closest(".modal").id);
+  if (t.classList.contains("modal")) return closeModal(t.id);
 });
+$("mlist").addEventListener("change", e => {
+  const id = e.target.dataset.id; if (!id) return;
+  e.target.checked ? S.shown.add(id) : S.shown.delete(id);
+  S.preset = "custom"; saveShown(); renderAll(); renderModelsSheet();
+});
+$("modelsBtn").onclick = () => { renderModelsSheet(); openModal("modelsModal"); };
+$("optsBtn").onclick = () => {
+  $("spreadSw").checked = !!S.spread;
+  $("lineLow").value = S.lines.low != null ? fmt(lineIn(S.lines.low)) : "";
+  $("lineHigh").value = S.lines.high != null ? fmt(lineIn(S.lines.high)) : "";
+  document.querySelectorAll("#optsModal .u").forEach(u => u.textContent = `°${S.unit}`);
+  openModal("optsModal");
+};
+$("spreadSw").onchange = () => { S.spread = $("spreadSw").checked; LS.set("spread", S.spread); renderMain(); };
+const saveLines = () => {
+  const v = id => $(id).value.trim() === "" || isNaN(+$(id).value) ? null : +$(id).value;
+  S.lines = { low: v("lineLow"), high: v("lineHigh"), unit: S.unit };
+  LS.set("lines", S.lines); renderToolbar(); renderMain();
+};
+$("lineLow").oninput = saveLines; $("lineHigh").oninput = saveLines;
+$("prevBtn").onclick = () => setStart(S.start - S.range);
+$("nextBtn").onclick = () => setStart(S.start + S.range);
 function setStart(i) {
   const n = S.data.dates.length;
   S.start = Math.max(0, Math.min(n - S.range, i));
   S.min = null; renderAll();
   const chip = $("days").children[S.start];
-  if (chip) chip.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  if (chip) { const strip = $("days"); strip.scrollTo({ left: Math.max(0, chip.offsetLeft - strip.offsetLeft - 8), behavior: "smooth" }); }
 }
-$("spreadBtn").onclick = () => { S.spread = !S.spread; LS.set("spread", S.spread); renderAll(); };
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") { closeFS(); $("linesModal").hidden = true; hideSugg(); }
-  if (e.key === "Enter" && e.target.classList?.contains("li")) e.target.click();
+  if (e.key === "Escape") { closeFS(); closeModal("modelsModal"); closeModal("optsModal"); hideSugg(); }
+  if (!S.data || /input|textarea/i.test(e.target.tagName) || document.querySelector(".modal:not([hidden])")) return;
+  if (e.key === "ArrowLeft" && !e.target.closest(".days")) setStart(S.start - S.range);
+  if (e.key === "ArrowRight" && !e.target.closest(".days")) setStart(S.start + S.range);
 });
 let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if (!S.data) return; renderMain(); }, 120); });
-
-// Reference lines dialog
-$("linesBtn").onclick = () => {
-  $("lineLow").value = S.lines.low != null ? fmt(lineIn(S.lines.low)) : "";
-  $("lineHigh").value = S.lines.high != null ? fmt(lineIn(S.lines.high)) : "";
-  document.querySelectorAll("#linesModal label").forEach((l, i) => l.firstChild.textContent = `${i ? "High line (≥" : "Low line (≤"} °${S.unit}) `);
-  $("linesModal").hidden = false; $("lineLow").focus();
-};
-$("linesSave").onclick = () => {
-  const v = id => $(id).value.trim() === "" ? null : +$(id).value;
-  S.lines = { low: v("lineLow"), high: v("lineHigh"), unit: S.unit };
-  LS.set("lines", S.lines); $("linesModal").hidden = true; renderAll();
-};
-$("linesClear").onclick = () => { S.lines = { low: null, high: null, unit: S.unit }; LS.set("lines", S.lines); $("linesModal").hidden = true; renderAll(); };
-$("linesModal").onclick = e => { if (e.target.id === "linesModal") $("linesModal").hidden = true; };
 
 // ---------- Search ----------
 function parseCoords(s) {
@@ -536,20 +544,31 @@ function parseCoords(s) {
 }
 const coordName = (lat, lon) => `${Math.abs(lat).toFixed(3)}°${lat >= 0 ? "N" : "S"}, ${Math.abs(lon).toFixed(3)}°${lon >= 0 ? "E" : "W"}`;
 let suggItems = [], suggAct = -1, sTimer, sSeq = 0;
-function showSugg(items, emptyMsg) {
+function showSugg(items, emptyMsg, header) {
   suggItems = items; suggAct = items.length ? 0 : -1;
   const ul = $("sugg");
-  ul.innerHTML = items.length ? items.map((p, i) => `<li role="option" data-i="${i}" class="${i === suggAct ? "act" : ""}">
+  ul.innerHTML = (header ? `<li class="shd">${esc(header)}</li>` : "") + (items.length ? items.map((p, i) => `<li role="option" data-i="${i}" class="${i === suggAct ? "act" : ""}">
       <div><b>${esc(p.name)}</b><br><small>${esc([p.admin1, p.country].filter(Boolean).join(", ") || "Coordinates")}</small></div>
       <span class="cc">${p.lat.toFixed(2)}, ${p.lon.toFixed(2)}</span></li>`).join("")
-    : `<li class="empty">${esc(emptyMsg || "No places found")}</li>`;
+    : `<li class="empty">${esc(emptyMsg || "No places found")}</li>`);
   ul.hidden = false;
 }
+function addRecent(l) {
+  const r = LS.get("recent", []).filter(x => Math.abs(x.lat - l.lat) > 0.01 || Math.abs(x.lon - l.lon) > 0.01);
+  LS.set("recent", [l, ...r].slice(0, 6));
+}
+function showRecent() { const r = LS.get("recent", []); r.length ? showSugg(r, "", "Recent") : hideSugg(); }
+function renderQuick() {
+  const r = LS.get("recent", []);
+  $("quick").innerHTML = (r.length ? `<div class="qlbl">Recent</div>` + r.map((p, i) => `<button class="recent" data-i="${i}">${esc(p.name)}</button>`).join("") + `<div class="qlbl">Popular</div>` : "")
+    + QUICK.map((p, i) => `<button data-i="${i}">${esc(p.name)}</button>`).join("");
+}
+$("q").addEventListener("focus", () => { if (!$("q").value.trim()) showRecent(); });
 function hideSugg() { $("sugg").hidden = true; suggItems = []; suggAct = -1; }
 $("q").addEventListener("input", () => {
   clearTimeout(sTimer);
   const v = $("q").value.trim();
-  if (!v) return hideSugg();
+  if (!v) return showRecent();
   const c = parseCoords(v);
   if (c) return showSugg([{ name: coordName(c.lat, c.lon), lat: c.lat, lon: c.lon, coords: true }]);
   if (v.length < 2) return hideSugg();
@@ -567,7 +586,7 @@ $("q").addEventListener("keydown", e => {
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();
     suggAct = (suggAct + (e.key === "ArrowDown" ? 1 : -1) + suggItems.length) % suggItems.length;
-    [...$("sugg").children].forEach((li, i) => li.classList.toggle("act", i === suggAct));
+    $("sugg").querySelectorAll("li[data-i]").forEach((li, i) => li.classList.toggle("act", i === suggAct));
   }
 });
 $("searchForm").addEventListener("submit", e => {
@@ -597,7 +616,7 @@ function status(msg, err) {
 }
 async function loadLocation(p, keepView) {
   S.loc = { name: p.name, admin1: p.admin1 || "", country: p.country || "", lat: +p.lat, lon: +p.lon };
-  LS.set("loc", S.loc);
+  LS.set("loc", S.loc); addRecent(S.loc);
   try { const u = new URL(location.href); u.search = `?lat=${S.loc.lat.toFixed(4)}&lon=${S.loc.lon.toFixed(4)}&name=${encodeURIComponent(S.loc.name)}`; history.replaceState(null, "", u); } catch {}
   document.title = `${S.loc.name} · Weather Overlay`;
   if (!keepView) { $("hero").hidden = true; $("view").hidden = true; status(`Loading every model for ${S.loc.name}…`); }
@@ -614,7 +633,7 @@ async function loadLocation(p, keepView) {
   }
 }
 $("home").onclick = e => {
-  e.preventDefault(); S.data = null; closeFS();
+  e.preventDefault(); S.data = null; closeFS(); renderQuick();
   $("view").hidden = true; $("status").hidden = true; $("hero").hidden = false;
   try { history.replaceState(null, "", location.pathname); } catch {}
   document.title = "Weather Overlay";
@@ -628,7 +647,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 // ---------- Boot ----------
-$("quick").innerHTML = QUICK.map((p, i) => `<button data-i="${i}">${esc(p.name)}</button>`).join("");
+renderQuick();
 (function boot() {
   const qp = new URLSearchParams(location.search);
   const lat = parseFloat(qp.get("lat")), lon = parseFloat(qp.get("lon"));

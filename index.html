@@ -50,52 +50,48 @@
 
     <section id="view" hidden>
       <div class="lochead">
-        <div>
+        <div class="locl">
           <h2 id="locName">—</h2>
           <div class="locmeta" id="locMeta"></div>
         </div>
         <div class="clock" id="clock"></div>
       </div>
 
-      <div class="days" id="days" role="tablist" aria-label="Days"></div>
+      <div class="days" id="days" role="tablist" aria-label="Choose a day"></div>
 
-      <div class="controls">
-        <div class="seg" id="range" role="group" aria-label="Time range">
-          <button data-r="1" class="on">1 day</button><button data-r="3">3 days</button><button data-r="7">7 days</button><button data-r="16">16 days</button>
+      <div class="toolbar">
+        <div class="seg" id="range" role="group" aria-label="How many days to show">
+          <button data-r="1" class="on"><span class="lg">1 day</span><span class="sm">1D</span></button><button data-r="3"><span class="lg">3 days</span><span class="sm">3D</span></button><button data-r="7"><span class="lg">7 days</span><span class="sm">7D</span></button><button data-r="16"><span class="lg">16 days</span><span class="sm">16D</span></button>
         </div>
-        <div class="ctl-right">
-          <button class="chip" id="spreadBtn" aria-pressed="true"><i class="band"></i>Spread</button>
-          <button class="chip" id="linesBtn"><i class="dash"></i>Lines</button>
+        <div class="tb-right">
+          <button class="btn" id="modelsBtn" aria-haspopup="dialog"><span class="mdots" id="mdots"></span>Models <b id="mcount">7</b></button>
+          <button class="btn icon" id="optsBtn" aria-haspopup="dialog" aria-label="Chart options" title="Chart options">
+            <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+          </button>
         </div>
       </div>
 
       <div class="grid">
-        <div class="card chartcard gbox" id="chartBox">
+        <div class="card chartcard" id="chartBox">
           <div class="chead">
-            <div class="gsum" id="gsum"></div>
-            <button class="iconbtn gexp" aria-label="Full screen" title="Full screen">
-              <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
-            </button>
+            <button class="iconbtn" id="prevBtn" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <div class="ctitle"><div class="ct" id="ctitle"></div></div>
+            <button class="iconbtn" id="nextBtn" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+            <button class="iconbtn gexp" aria-label="Full screen" title="Full screen"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
           </div>
+          <div class="gsum" id="gsum"></div>
           <div class="chart" id="chart"></div>
-          <div class="hint">Tap or drag the chart to read every model at that hour. Shaded area = hours already passed.</div>
         </div>
 
-        <aside class="card side gbox-side">
+        <aside class="card side">
           <div class="readout" id="readout"></div>
-          <div class="presets" id="presets">
-            <span>Show</span>
-            <button data-p="core">Core 7</button><button data-p="global">Global</button><button data-p="regional">High-res</button><button data-p="all">All</button><button data-p="none">None</button>
-          </div>
-          <div class="glh" id="legendTitle"></div>
-          <div class="legend" id="legend"></div>
-          <div class="ltip">Tap a name to highlight its line · tap the dot to hide or show it.</div>
+          <div class="ltip">Drag across the chart to change the time · tap a model to highlight it</div>
         </aside>
       </div>
 
       <div class="card tablecard">
         <div class="thead">
-          <h3>Daily high / low by model</h3>
+          <h3>Daily high / low</h3>
           <span class="tsub">Tap a day to chart it</span>
         </div>
         <div class="tscroll" id="table"></div>
@@ -111,13 +107,29 @@
   </footer>
 </div>
 
-<div class="modal" id="linesModal" hidden>
-  <div class="sheet" role="dialog" aria-labelledby="linesTitle">
-    <h3 id="linesTitle">Reference lines</h3>
-    <p>Draw dashed lines on the chart at temperatures you care about — a market bucket edge, a frost threshold, a record.</p>
-    <label>Low line (≤)<input id="lineLow" type="number" step="0.5" inputmode="decimal" placeholder="e.g. 18"></label>
-    <label>High line (≥)<input id="lineHigh" type="number" step="0.5" inputmode="decimal" placeholder="e.g. 28"></label>
-    <div class="sheetbtns"><button class="ghost" id="linesClear">Clear</button><button class="primary" id="linesSave">Save</button></div>
+<div class="modal" id="modelsModal" hidden>
+  <div class="sheet big" role="dialog" aria-labelledby="modelsTitle">
+    <div class="shead"><h3 id="modelsTitle">Models</h3><span class="scount" id="scount"></span><button class="done" data-close>Done</button></div>
+    <div class="mpresets" id="mpresets">
+      <button data-p="core"><b>Core 7</b><small>Scanner set</small></button>
+      <button data-p="global"><b>Global</b><small>Worldwide</small></button>
+      <button data-p="regional"><b>High-res</b><small>Local detail</small></button>
+      <button data-p="all"><b>All</b><small>Everything</small></button>
+    </div>
+    <div class="mlist" id="mlist"></div>
+  </div>
+</div>
+
+<div class="modal" id="optsModal" hidden>
+  <div class="sheet" role="dialog" aria-labelledby="optsTitle">
+    <div class="shead"><h3 id="optsTitle">Chart options</h3><button class="done" data-close>Done</button></div>
+    <label class="optrow"><span><b>Spread band</b><small>Shade the range between the warmest and coldest model</small></span><input type="checkbox" class="sw" id="spreadSw"></label>
+    <div class="optrow col"><span><b>Reference lines</b><small>Dashed lines at temperatures you care about, like a market bucket edge or frost</small></span>
+      <div class="lines2">
+        <label>Low line (≤ <i class="u">°C</i>)<input id="lineLow" type="number" step="0.5" inputmode="decimal" placeholder="none"></label>
+        <label>High line (≥ <i class="u">°C</i>)<input id="lineHigh" type="number" step="0.5" inputmode="decimal" placeholder="none"></label>
+      </div>
+    </div>
   </div>
 </div>
 
