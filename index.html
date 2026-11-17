@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Weather Overlay — every major forecast model on one chart. Compare ECMWF, GFS, GEM, ICON, UKMO, Météo-France, JMA and more for any place on Earth.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Weather Overlay">
+<meta name="theme-color" content="#0a0e22">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<title>Weather Overlay</title>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <a class="brand" href="/" id="home" aria-label="Weather Overlay home">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M3 22c4-9 7-12 11-7s7 2 15-8" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M3 25c5-6 8-8 12-4s8 0 14-6" stroke="rgba(255,255,255,.55)" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      </span>
+      <span class="wordmark">Weather <b>Overlay</b></span>
+    </a>
+    <form class="search" id="searchForm" autocomplete="off" role="search">
+      <svg class="sicon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Search a city, place or lat, lon" aria-label="Search location" enterkeyhint="search" spellcheck="false">
+      <button type="button" class="locbtn" id="locate" title="Use my location" aria-label="Use my location">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7.5"/></svg>
+      </button>
+      <ul class="sugg" id="sugg" role="listbox" hidden></ul>
+    </form>
+    <div class="unit" role="group" aria-label="Temperature unit">
+      <button data-unit="C" class="on">°C</button><button data-unit="F">°F</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="hero" class="hero">
+      <div class="eyebrow">Multi-model forecast comparison</div>
+      <h1>Every forecast model.<br><span>One chart.</span></h1>
+      <p>Overlay hourly temperature from ECMWF, GFS, GEM, ICON, UK Met Office, Météo-France, JMA and 40+ global and high-resolution regional models for any place on Earth.</p>
+      <div class="quick" id="quick"></div>
+    </section>
+
+    <section id="view" hidden>
+      <div class="lochead">
+        <div>
+          <h2 id="locName">—</h2>
+          <div class="locmeta" id="locMeta"></div>
+        </div>
+        <div class="clock" id="clock"></div>
+      </div>
+
+      <div class="days" id="days" role="tablist" aria-label="Days"></div>
+
+      <div class="controls">
+        <div class="seg" id="range" role="group" aria-label="Time range">
+          <button data-r="1" class="on">1 day</button><button data-r="3">3 days</button><button data-r="7">7 days</button><button data-r="16">16 days</button>
+        </div>
+        <div class="ctl-right">
+          <button class="chip" id="spreadBtn" aria-pressed="true"><i class="band"></i>Spread</button>
+          <button class="chip" id="linesBtn"><i class="dash"></i>Lines</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card chartcard gbox" id="chartBox">
+          <div class="chead">
+            <div class="gsum" id="gsum"></div>
+            <button class="iconbtn gexp" aria-label="Full screen" title="Full screen">
+              <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+            </button>
+          </div>
+          <div class="chart" id="chart"></div>
+          <div class="hint">Tap or drag the chart to read every model at that hour. Shaded area = hours already passed.</div>
+        </div>
+
+        <aside class="card side gbox-side">
+          <div class="readout" id="readout"></div>
+          <div class="presets" id="presets">
+            <span>Show</span>
+            <button data-p="core">Core 7</button><button data-p="global">Global</button><button data-p="regional">High-res</button><button data-p="all">All</button><button data-p="none">None</button>
+          </div>
+          <div class="glh" id="legendTitle"></div>
+          <div class="legend" id="legend"></div>
+          <div class="ltip">Tap a name to highlight its line · tap the dot to hide or show it.</div>
+        </aside>
+      </div>
+
+      <div class="card tablecard">
+        <div class="thead">
+          <h3>Daily high / low by model</h3>
+          <span class="tsub">Tap a day to chart it</span>
+        </div>
+        <div class="tscroll" id="table"></div>
+      </div>
+    </section>
+
+    <div id="status" class="status" hidden></div>
+  </main>
+
+  <footer class="foot">
+    <span>Weather Overlay</span>
+    <span>Forecast data by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (CC BY 4.0) from national weather services. For information only.</span>
+  </footer>
+</div>
+
+<div class="modal" id="linesModal" hidden>
+  <div class="sheet" role="dialog" aria-labelledby="linesTitle">
+    <h3 id="linesTitle">Reference lines</h3>
+    <p>Draw dashed lines on the chart at temperatures you care about — a market bucket edge, a frost threshold, a record.</p>
+    <label>Low line (≤)<input id="lineLow" type="number" step="0.5" inputmode="decimal" placeholder="e.g. 18"></label>
+    <label>High line (≥)<input id="lineHigh" type="number" step="0.5" inputmode="decimal" placeholder="e.g. 28"></label>
+    <div class="sheetbtns"><button class="ghost" id="linesClear">Clear</button><button class="primary" id="linesSave">Save</button></div>
+  </div>
+</div>
+
+<script src="/models.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
