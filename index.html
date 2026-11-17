@@ -44,7 +44,7 @@
     <section id="hero" class="hero">
       <div class="eyebrow">Multi-model forecast comparison</div>
       <h1>Every forecast model.<br><span>One chart.</span></h1>
-      <p>Overlay hourly temperature from ECMWF, GFS, GEM, ICON, UK Met Office, Météo-France, JMA and 40+ global and high-resolution regional models for any place on Earth.</p>
+      <p>Overlay temperature, dew point, feels-like, cloud, precipitation, wind, CAPE and helicity from ECMWF, GFS, GEM, ICON, UK Met Office, Météo-France, JMA and 40+ global and high-resolution regional models for any place on Earth.</p>
       <div class="quick" id="quick"></div>
     </section>
 
@@ -57,6 +57,11 @@
         <div class="clock" id="clock"></div>
       </div>
 
+      <nav class="tabs" id="tabs" role="tablist" aria-label="Forecast views"></nav>
+
+      <div id="overview" class="overview"></div>
+
+      <div id="paramView" hidden>
       <div class="days" id="days" role="tablist" aria-label="Choose a day"></div>
 
       <div class="toolbar">
@@ -70,6 +75,7 @@
           </button>
         </div>
       </div>
+      <div class="seg modes" id="modes" hidden></div>
 
       <div class="grid">
         <div class="card chartcard" id="chartBox">
@@ -91,10 +97,11 @@
 
       <div class="card tablecard">
         <div class="thead">
-          <h3>Daily high / low</h3>
+          <h3 id="tableTitle">Daily high / low</h3>
           <span class="tsub">Tap a day to chart it</span>
         </div>
         <div class="tscroll" id="table"></div>
+      </div>
       </div>
     </section>
 
@@ -124,7 +131,13 @@
   <div class="sheet" role="dialog" aria-labelledby="optsTitle">
     <div class="shead"><h3 id="optsTitle">Chart options</h3><button class="done" data-close>Done</button></div>
     <label class="optrow"><span><b>Spread band</b><small>Shade the range between the warmest and coldest model</small></span><input type="checkbox" class="sw" id="spreadSw"></label>
-    <div class="optrow col"><span><b>Reference lines</b><small>Dashed lines at temperatures you care about, like a market bucket edge or frost</small></span>
+    <div class="optrow col"><span><b>Wind units</b></span>
+      <div class="seg full"><button data-wu="kmh">km/h</button><button data-wu="mph">mph</button><button data-wu="kn">knots</button><button data-wu="ms">m/s</button></div>
+    </div>
+    <div class="optrow col"><span><b>Precipitation units</b></span>
+      <div class="seg full"><button data-pu="mm">mm / cm</button><button data-pu="in">inches</button></div>
+    </div>
+    <div class="optrow col"><span><b>Reference lines</b> <small style="display:inline">(temperature tabs)</small><small>Dashed lines at temperatures you care about, like a market bucket edge or frost</small></span>
       <div class="lines2">
         <label>Low line (≤ <i class="u">°C</i>)<input id="lineLow" type="number" step="0.5" inputmode="decimal" placeholder="none"></label>
         <label>High line (≥ <i class="u">°C</i>)<input id="lineHigh" type="number" step="0.5" inputmode="decimal" placeholder="none"></label>

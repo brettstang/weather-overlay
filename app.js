@@ -1,5 +1,5 @@
 "use strict";
-/* Weather Overlay — every Open-Meteo model's hourly temperature on one chart. */
+/* Weather Overlay — every Open-Meteo model on one chart, for many parameters. */
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -7,238 +7,389 @@ const LS = {
   get(k, d) { try { const v = localStorage.getItem("wo:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem("wo:" + k, JSON.stringify(v)); } catch {} }
 };
-const r1 = v => Math.round(v * 10) / 10;
-const fmt = v => v == null ? "–" : (Math.round(v * 10) / 10).toFixed(1).replace(/\.0$/, "");
+const fmt = v => v == null || !isFinite(v) ? "–" : (Math.round(v * 10) / 10).toFixed(1).replace(/\.0$/, "");
+const mean = a => a.length ? a.reduce((s, b) => s + b, 0) / a.length : null;
+const pad = n => String(n).padStart(2, "0");
 
 const MODEL_BY_ID = Object.fromEntries(MODELS.map(m => [m.id, m]));
-const BLEND = { id: "blend", short: "Blend", name: "Open-Meteo best match", provider: "Open-Meteo", res: "auto", color: "#ffffff" };
-const META = id => id === "blend" ? BLEND : MODEL_BY_ID[id];
-const colorOf = id => id === "blend" ? "rgba(255,255,255,.8)" : (MODEL_BY_ID[id]?.color || "#aaa");
+const META = id => MODEL_BY_ID[id];
+const colorOf = id => MODEL_BY_ID[id]?.color || "#aaa";
 
 const API = "https://api.open-meteo.com/v1/forecast";
 const GEO = "https://geocoding-api.open-meteo.com/v1/search";
 const PAST_DAYS = 3, FORECAST_DAYS = 16;
+const BASE_VARS = ["temperature_2m", "apparent_temperature", "dew_point_2m", "cloud_cover", "precipitation", "rain", "showers", "snowfall",
+                   "wind_speed_10m", "wind_gusts_10m", "wind_direction_10m", "cape"];
+// Models that publish winds on pressure levels (needed for the helicity estimate)
+const SRH_MODELS = ["ecmwf_ifs025", "ecmwf_ifs", "gfs_seamless", "gfs_global", "gfs_hrrr", "ncep_nam_conus", "gem_seamless", "gem_global", "gem_regional",
+                    "gem_hrdps_continental", "icon_seamless", "icon_global", "icon_eu", "ukmo_seamless", "meteofrance_seamless", "meteofrance_arpege_world",
+                    "jma_seamless", "kma_seamless", "cma_grapes_global", "bom_access_global"];
+const SRH_LEVELS = [1000, 975, 950, 925, 900, 850, 800, 700, 600, 500];
+
+// ---------- Parameters (tabs) ----------
+const PARAMS = {
+  temp:   { label: "Temperature", short: "Temp", kind: "temp", v: "temperature_2m", agg: "hilo" },
+  feels:  { label: "Feels like", short: "Feels like", kind: "temp", v: "apparent_temperature", agg: "hilo" },
+  dew:    { label: "Dew point", short: "Dew point", kind: "temp", v: "dew_point_2m", agg: "hilo" },
+  cloud:  { label: "Cloud cover", short: "Cloud", kind: "pct", v: "cloud_cover", agg: "mean", fixed: [0, 100] },
+  precip: { label: "Precipitation", short: "Precip", kind: "precip", v: "precipitation", agg: "sum",
+            modes: [["acc", "Total"], ["hr", "Hourly"], ["snow", "Snow"]] },
+  wind:   { label: "Wind", short: "Wind", kind: "wind", v: "wind_speed_10m", agg: "max", modes: [["speed", "Sustained"], ["gust", "Gusts"]] },
+  cape:   { label: "CAPE", short: "CAPE", kind: "cape", v: "cape", agg: "max", guides: [[1000, "Moderate"], [2500, "Strong"], [4000, "Extreme"]] },
+  srh:    { label: "Helicity", short: "Helicity", kind: "srh", v: "srh", agg: "max", guides: [[150, "Supercell"], [300, "Strong"]], lazy: true },
+};
+const TABS = ["overview", "temp", "feels", "dew", "cloud", "precip", "wind", "cape", "srh"];
+const TAB_LABEL = { overview: "Overview", temp: "Temp", feels: "Feels like", dew: "Dew point", cloud: "Cloud", precip: "Precip", wind: "Wind", cape: "CAPE", srh: "Helicity" };
 
 const S = {
-  loc: null, data: null,
-  unit: LS.get("unit", "C"),
-  range: LS.get("range", 1),
-  start: PAST_DAYS,
-  shown: new Set(LS.get("shown", ["blend", ...CORE_MODELS])),
-  preset: LS.get("preset", "core"),
-  spread: LS.get("spread", true),
-  lines: LS.get("lines", { low: null, high: null, unit: "C" }),
+  loc: null, data: null, tab: "overview",
+  unit: LS.get("unit", "C"), windU: LS.get("windU", null), precipU: LS.get("precipU", null),
+  range: LS.get("range", 1), start: PAST_DAYS,
+  shown: new Set(LS.get("shown", CORE_MODELS)), preset: LS.get("preset", "core"),
+  spread: LS.get("spread", true), lines: LS.get("lines", { low: null, high: null, unit: "C" }),
+  mode: LS.get("mode", { precip: "acc", wind: "speed" }),
   sel: "", min: null
 };
+S.shown.delete("blend");
 
 const QUICK = [
   { name: "New York", admin1: "New York", country: "United States", lat: 40.7128, lon: -74.006 },
   { name: "Chicago", admin1: "Illinois", country: "United States", lat: 41.8781, lon: -87.6298 },
+  { name: "Oklahoma City", admin1: "Oklahoma", country: "United States", lat: 35.4676, lon: -97.5164 },
   { name: "Dallas", admin1: "Texas", country: "United States", lat: 32.7767, lon: -96.797 },
   { name: "Toronto", admin1: "Ontario", country: "Canada", lat: 43.6532, lon: -79.3832 },
   { name: "Regina", admin1: "Saskatchewan", country: "Canada", lat: 50.4452, lon: -104.6189 },
   { name: "London", admin1: "England", country: "United Kingdom", lat: 51.5072, lon: -0.1276 },
   { name: "Paris", admin1: "Île-de-France", country: "France", lat: 48.8566, lon: 2.3522 },
   { name: "Tokyo", admin1: "Tokyo", country: "Japan", lat: 35.6762, lon: 139.6503 },
-  { name: "Karachi", admin1: "Sindh", country: "Pakistan", lat: 24.9065, lon: 67.1608 },
   { name: "Sydney", admin1: "New South Wales", country: "Australia", lat: -33.8688, lon: 151.2093 },
 ];
 
 // ---------- Units ----------
-const cv = c => c == null ? null : S.unit === "F" ? c * 9 / 5 + 32 : c;
+const windU = () => S.windU || (S.unit === "F" ? "mph" : "kmh");
+const precipU = () => S.precipU || (S.unit === "F" ? "in" : "mm");
+const WIND_F = { kmh: 1, mph: 0.621371, kn: 0.539957, ms: 1 / 3.6 };
+const WIND_L = { kmh: "km/h", mph: "mph", kn: "kt", ms: "m/s" };
+const cvT = c => c == null ? null : S.unit === "F" ? c * 9 / 5 + 32 : c;
+const tDelta = d => S.unit === "F" ? d * 1.8 : d;
+const cvW = k => k == null ? null : k * WIND_F[windU()];
+const cvP = mm => mm == null ? null : precipU() === "in" ? mm / 25.4 : mm;
+const cvS = cm => cm == null ? null : precipU() === "in" ? cm / 2.54 : cm;
 const lineIn = v => v == null || v === "" ? null : S.lines.unit === S.unit ? +v : S.unit === "F" ? v * 9 / 5 + 32 : (v - 32) * 5 / 9;
+function unitOf(pk, mode = S.mode[pk]) {
+  const k = PARAMS[pk].kind;
+  return k === "temp" ? `°${S.unit}` : k === "pct" ? "%" : k === "wind" ? WIND_L[windU()] : k === "cape" ? "J/kg" : k === "srh" ? "m²/s²"
+    : mode === "snow" ? (precipU() === "in" ? "in" : "cm") : precipU();
+}
+function conv(pk, mode = S.mode[pk]) {
+  const k = PARAMS[pk].kind;
+  return k === "temp" ? cvT : k === "wind" ? cvW : k === "precip" ? (mode === "snow" ? cvS : cvP) : (v => v);
+}
+function fv(pk, v, mode = S.mode[pk]) {           // format a display value
+  if (v == null || !isFinite(v)) return "–";
+  const k = PARAMS[pk].kind;
+  if (k === "temp") return fmt(v) + "°";
+  if (k === "pct") return Math.round(v) + "%";
+  if (k === "precip") return (precipU() === "in" ? (Math.round(v * 100) / 100).toFixed(2) : fmt(v));
+  return String(Math.round(v));
+}
+const varOf = (pk, mode = S.mode[pk]) => pk === "precip" && mode === "snow" ? "snowfall" : pk === "wind" && mode === "gust" ? "wind_gusts_10m" : PARAMS[pk].v;
+const cumulative = (pk, mode = S.mode[pk]) => pk === "precip" && mode !== "hr";
 
 // ---------- Dates ----------
 const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WDL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MO = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const dObj = d => new Date(d + "T12:00:00Z");
 const dayShort = d => { const t = dObj(d); return `${WD[t.getUTCDay()]} ${t.getUTCDate()}`; };
 const dayLong = d => { const t = dObj(d); return `${WD[t.getUTCDay()]}, ${MO[t.getUTCMonth()]} ${t.getUTCDate()}`; };
-const pad = n => String(n).padStart(2, "0");
 
-// ---------- Data ----------
+// ---------- Fetching ----------
 async function getJSON(url) {
   const r = await fetch(url);
   let j; try { j = await r.json(); } catch { throw new Error(`Server returned ${r.status}`); }
   if (!r.ok || j.error) { const e = new Error(j.reason || `Server returned ${r.status}`); e.reason = j.reason || ""; throw e; }
   return j;
 }
-const fcURL = (lat, lon, ids) =>
-  `${API}?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&hourly=temperature_2m&models=${ids.join(",")}&timezone=auto&past_days=${PAST_DAYS}&forecast_days=${FORECAST_DAYS}`;
+const fcURL = (lat, lon, vars, ids, fdays = FORECAST_DAYS) =>
+  `${API}?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&hourly=${vars.join(",")}&models=${ids.join(",")}&timezone=auto&past_days=${PAST_DAYS}&forecast_days=${fdays}`;
 
-async function fetchForecast(lat, lon) {
-  let ids = MODELS.map(m => m.id);
-  // One request for every model. If Open-Meteo doesn't know a model id, drop it and retry.
-  for (let i = 0; i < 10; i++) {
-    try { return parse(await getJSON(fcURL(lat, lon, ids)), ids); }
+// One request for many models × variables. Unknown model or variable names are dropped and the request retried.
+async function fetchMulti(lat, lon, vars, ids, fdays) {
+  vars = [...vars]; ids = [...ids];
+  for (let i = 0; i < 14; i++) {
+    try { return { j: await getJSON(fcURL(lat, lon, vars, ids, fdays)), vars, ids }; }
     catch (e) {
-      if (e.reason == null) throw e;                         // network failure
-      const bad = e.reason.match(/value\s+["']?([a-z0-9_]+)/i);
-      if (bad && ids.includes(bad[1])) { ids = ids.filter(x => x !== bad[1]); continue; }
+      if (e.reason == null) throw e;
+      const bad = e.reason.match(/value\s+["']?([A-Za-z0-9_]+)/);
+      if (bad && ids.includes(bad[1]) && ids.length > 1) { ids = ids.filter(x => x !== bad[1]); continue; }
+      if (bad && vars.includes(bad[1]) && vars.length > 1) { vars = vars.filter(x => x !== bad[1]); continue; }
       break;
     }
   }
-  // Fallback: one request per model, keep whatever works.
-  const res = await Promise.allSettled(ids.map(id => getJSON(fcURL(lat, lon, [id])).then(j => ({ id, j }))));
+  // Fallback: one model at a time
+  const res = await Promise.allSettled(ids.map(id => getJSON(fcURL(lat, lon, vars, [id], fdays)).then(j => ({ j, id }))));
   const ok = res.filter(r => r.status === "fulfilled").map(r => r.value);
   if (!ok.length) throw new Error("No forecast data came back for this location.");
-  const base = ok[0].j, series = {};
-  for (const { id, j } of ok) {
-    const arr = j.hourly?.temperature_2m;
-    if (arr && arr.some(v => v != null) && j.hourly.time.length === base.hourly.time.length) series[id === "best_match" ? "blend" : id] = arr;
-  }
-  return build(base, series);
+  const merged = { ...ok[0].j, hourly: { time: ok[0].j.hourly.time } };
+  for (const { j, id } of ok) for (const v of vars) if (j.hourly?.[v]) merged.hourly[`${v}_${id}`] = j.hourly[v];
+  return { j: merged, vars, ids: ok.map(o => o.id), multi: true };
 }
-function parse(j, ids) {
-  const h = j.hourly || {}, series = {};
-  for (const id of ids) {
-    const arr = h[`temperature_2m_${id}`] ?? (ids.length === 1 ? h.temperature_2m : null);
-    if (arr && arr.some(v => v != null)) series[id === "best_match" ? "blend" : id] = arr;
-  }
-  return build(j, series);
-}
-function build(j, series) {
-  const times = j.hourly.time;
+function pick(h, v, id, single) { return h[`${v}_${id}`] ?? (single ? h[v] : null); }
+
+async function fetchForecast(lat, lon) {
+  const ids = MODELS.map(m => m.id);
+  const { j, vars, ids: got, multi } = await fetchMulti(lat, lon, BASE_VARS, ids);
+  const h = j.hourly, times = h.time, single = got.length === 1 && !multi;
   const t2u = t => Date.UTC(+t.slice(0, 4), +t.slice(5, 7) - 1, +t.slice(8, 10), +(t.slice(11, 13) || 0), +(t.slice(14, 16) || 0));
   const base = t2u(times[0].slice(0, 10));
-  const mins = times.map(t => (t2u(t) - base) / 60000);
-  const dates = [...new Set(times.map(t => t.slice(0, 10)))];
-  const pts = {};
-  for (const [id, arr] of Object.entries(series)) {
-    const p = [];
-    arr.forEach((v, i) => { if (v != null) p.push({ m: mins[i], v }); });
-    pts[id] = p;
+  const D = {
+    tz: j.timezone, tzAbbr: j.timezone_abbreviation, offset: j.utc_offset_seconds || 0, elev: j.elevation ?? 0,
+    lat: j.latitude, lon: j.longitude, base, times,
+    mins: times.map(t => (t2u(t) - base) / 60000),
+    tIndex: new Map(times.map((t, i) => [t, i])),
+    dates: [...new Set(times.map(t => t.slice(0, 10)))],
+    raw: {}, fetched: Date.now(), srhState: null, memo: new Map()
+  };
+  for (const v of vars) {
+    D.raw[v] = {};
+    for (const id of got) { const a = pick(h, v, id, single); if (a && a.some(x => x != null)) D.raw[v][id] = a; }
   }
-  const order = ["blend", ...MODELS.map(m => m.id)].filter(id => pts[id]);
-  // Daily extremes per source (needs most of the day's hours)
-  const daily = {};
-  for (const id of order) daily[id] = dates.map((_, i) => {
-    const d = pts[id].filter(p => p.m >= i * 1440 && p.m < (i + 1) * 1440);
-    if (d.length < 18) return null;
-    let hi = d[0], lo = d[0];
-    for (const p of d) { if (p.v > hi.v) hi = p; if (p.v < lo.v) lo = p; }
-    return { hi: hi.v, hiM: hi.m, lo: lo.v, loM: lo.m };
-  });
-  return { tz: j.timezone, tzAbbr: j.timezone_abbreviation, offset: j.utc_offset_seconds || 0, elev: j.elevation,
-           lat: j.latitude, lon: j.longitude, dates, base, pts, order, daily, fetched: Date.now() };
+  if (!Object.keys(D.raw.temperature_2m || {}).length) throw new Error("No model has data for this location.");
+  return D;
 }
+
+// ---------- Helicity (estimated 0–3 km storm-relative helicity) ----------
+async function loadSRH() {
+  const D = S.data;
+  if (!D || D.srhState) return;
+  D.srhState = "loading"; renderAll();
+  const vars = ["wind_speed_10m", "wind_direction_10m"];
+  for (const L of SRH_LEVELS) vars.push(`wind_speed_${L}hPa`, `wind_direction_${L}hPa`, `geopotential_height_${L}hPa`);
+  try {
+    const { j, vars: gv, ids, multi } = await fetchMulti(D.lat, D.lon, vars, SRH_MODELS, 8);
+    if (S.data !== D) return;
+    const h = j.hourly, single = ids.length === 1 && !multi;
+    const levels = SRH_LEVELS.filter(L => gv.includes(`wind_speed_${L}hPa`) && gv.includes(`geopotential_height_${L}hPa`));
+    D.raw.srh = {};
+    for (const id of ids) {
+      const s10 = pick(h, "wind_speed_10m", id, single), d10 = pick(h, "wind_direction_10m", id, single);
+      const lv = levels.map(L => ({ s: pick(h, `wind_speed_${L}hPa`, id, single), d: pick(h, `wind_direction_${L}hPa`, id, single), z: pick(h, `geopotential_height_${L}hPa`, id, single) }))
+                       .filter(l => l.s && l.d && l.z);
+      if (!s10 || lv.length < 3) continue;
+      const out = new Array(D.times.length).fill(null);
+      let any = false;
+      h.time.forEach((t, k) => {
+        const bi = D.tIndex.get(t); if (bi == null) return;
+        const prof = [];
+        if (s10[k] != null && d10[k] != null) prof.push(uvAt(10, s10[k], d10[k]));
+        for (const l of lv) { const z = l.z[k] - D.elev; if (l.s[k] != null && l.d[k] != null && l.z[k] != null && z > 30) prof.push(uvAt(z, l.s[k], l.d[k])); }
+        const v = srh03(prof);
+        if (v != null) { out[bi] = v; any = true; }
+      });
+      if (any) D.raw.srh[id] = out;
+    }
+    D.srhState = Object.keys(D.raw.srh).length ? "ok" : "none";
+  } catch (e) { D.srhState = "error"; D.srhErr = e.message; }
+  if (S.data === D) { D.memo.clear(); renderAll(); }
+}
+function uvAt(z, kmh, dir) { const s = kmh / 3.6, r = dir * Math.PI / 180; return { z, u: -s * Math.sin(r), v: -s * Math.cos(r) }; }
+function srh03(prof) {
+  prof.sort((a, b) => a.z - b.z);
+  if (prof.length < 3 || prof[prof.length - 1].z < 3000) return null;
+  const at = z => { for (let i = 1; i < prof.length; i++) if (prof[i].z >= z) { const a = prof[i - 1], b = prof[i], f = (z - a.z) / (b.z - a.z || 1); return { u: a.u + (b.u - a.u) * f, v: a.v + (b.v - a.v) * f }; } return null; };
+  const top = Math.min(6000, prof[prof.length - 1].z);
+  // Bunkers right-mover storm motion from the 0–6 km layer (or as deep as the data goes)
+  const mw = { u: 0, v: 0 }; let n = 0;
+  for (let z = 10; z <= top; z += 250) { const w = at(z); if (w) { mw.u += w.u; mw.v += w.v; n++; } }
+  if (!n) return null; mw.u /= n; mw.v /= n;
+  const lowA = at(10), lowB = at(500), hiA = at(top - 500), hiB = at(top);
+  if (!lowA || !lowB || !hiA || !hiB) return null;
+  const sh = { u: (hiA.u + hiB.u) / 2 - (lowA.u + lowB.u) / 2, v: (hiA.v + hiB.v) / 2 - (lowA.v + lowB.v) / 2 };
+  const mag = Math.hypot(sh.u, sh.v) || 1;
+  const c = { u: mw.u + 7.5 * sh.v / mag, v: mw.v - 7.5 * sh.u / mag };
+  let s = 0, prev = at(10);
+  for (let z = 260; z <= 3000; z += 250) {
+    const w = at(Math.min(z, 3000)); if (!w) return null;
+    s += (w.u - c.u) * (prev.v - c.v) - (prev.u - c.u) * (w.v - c.v);
+    prev = w;
+  }
+  return Math.round(s);
+}
+
+// ---------- Series helpers ----------
 const nowMin = () => S.data ? (Date.now() + S.data.offset * 1000 - S.data.base) / 60000 : null;
 const todayIdx = () => Math.max(0, Math.min(S.data.dates.length - 1, Math.floor(nowMin() / 1440)));
+const nowIdx = () => { const D = S.data, m = nowMin(); let best = 0; D.mins.forEach((x, i) => { if (Math.abs(x - m) < Math.abs(D.mins[best] - m)) best = i; }); return best; };
+const avail = v => S.data ? MODELS.map(m => m.id).filter(id => S.data.raw[v]?.[id]) : [];
+const visibleFor = v => avail(v).filter(id => S.shown.has(id));
+const paramKey = () => PARAMS[S.tab] ? S.tab : "temp";
 
-// ---------- Visible sources ----------
-const visible = () => S.data ? S.data.order.filter(id => S.shown.has(id)) : [];
-const modelIds = ids => ids.filter(id => id !== "blend");
+// Daily aggregate for one model and one day, in raw units
+function dayAgg(v, agg, id, i) {
+  const D = S.data, key = `${v}|${agg}|${id}|${i}`;
+  if (D.memo.has(key)) return D.memo.get(key);
+  const a = D.raw[v]?.[id]; let out = null;
+  if (a) {
+    let hi = null, lo = null, sum = 0, n = 0;
+    for (let k = 0; k < a.length; k++) {
+      const m = D.mins[k]; if (m < i * 1440 || m >= (i + 1) * 1440 || a[k] == null) continue;
+      const x = a[k]; n++; sum += x;
+      if (!hi || x > hi.v) hi = { v: x, m }; if (!lo || x < lo.v) lo = { v: x, m };
+    }
+    if (n >= 18) out = agg === "hilo" ? { hi: hi.v, hiM: hi.m, lo: lo.v, loM: lo.m } : agg === "mean" ? { v: sum / n } : agg === "sum" ? { v: sum } : { v: hi.v, m: hi.m };
+  }
+  D.memo.set(key, out);
+  return out;
+}
+function aggOf(pk) { return pk === "precip" ? "sum" : PARAMS[pk].agg; }
 
-// ---------- Window (selected days) ----------
+// Precipitation type for one model at one hour
+function ptype(id, k) {
+  const R = S.data.raw, p = R.precipitation?.[id]?.[k], sn = R.snowfall?.[id]?.[k] || 0;
+  const liq = (R.rain?.[id]?.[k] || 0) + (R.showers?.[id]?.[k] || 0);
+  if (sn >= 0.02 && liq < 0.05) return "snow";
+  if (sn >= 0.02) return "mix";
+  if ((p ?? liq) >= 0.1) return "rain";
+  return null;
+}
+const PT_COLOR = { rain: "#4cc9f0", snow: "#e9f1ff", mix: "#c084fc" };
+const PT_LABEL = { rain: "Rain", snow: "Snow", mix: "Mix" };
+
+// The chart's series for the current tab and window
 function windowSeries() {
-  const D = S.data, ws = S.start * 1440, span = S.range * 1440;
-  return visible().map(id => ({
-    id, pts: D.pts[id].filter(p => p.m >= ws && p.m <= ws + span).map(p => ({ m: p.m - ws, v: cv(p.v) }))
-  })).filter(s => s.pts.length);
+  const D = S.data, pk = paramKey(), v = varOf(pk), c = conv(pk), ws = S.start * 1440, we = ws + S.range * 1440, cum = cumulative(pk);
+  return visibleFor(v).map(id => {
+    const a = D.raw[v][id], pts = []; let acc = 0, started = false;
+    for (let k = 0; k < a.length; k++) {
+      const m = D.mins[k]; if (m < ws || m > we) continue;
+      if (cum) {
+        if (!started) { pts.push({ m: m - ws, v: 0, k }); started = true; continue; }
+        if (a[k] != null) acc += a[k];
+        pts.push({ m: m - ws, v: c(acc), k });
+      } else if (a[k] != null) pts.push({ m: m - ws, v: c(a[k]), k });
+    }
+    return { id, pts };
+  }).filter(s => s.pts.length);
 }
 function hhmm(m, multi) {
   const D = S.data, di = Math.min(D.dates.length - 1, S.start + Math.floor(m / 1440));
   return `${multi ? dayShort(D.dates[di]) + " " : ""}${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
 }
+function niceStep(r, n) { const raw = r / n, p = Math.pow(10, Math.floor(Math.log10(raw || 1))), f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
 
 // ---------- Chart ----------
-function chartSVG(W, H, compact) {
-  const D = S.data, series = windowSeries(), span = S.range * 1440, multi = S.range > 1;
-  const L = 38, R = 12, T = 16, B = 26;
+function chartSVG(W, H) {
+  const D = S.data, pk = paramKey(), P = PARAMS[pk], series = windowSeries(), span = S.range * 1440, multi = S.range > 1;
+  const isPrecip = pk === "precip", L = 42, R = 12, T = 18, B = isPrecip ? 40 : 26;
   const all = series.flatMap(s => s.pts.map(p => p.v));
-  if (!all.length) return { svg: `<div class="status">No models selected. Pick some on the right.</div>`, G: null };
-  let lo = Math.min(...all), hi = Math.max(...all);
-  const lLow = lineIn(S.lines.low), lHigh = lineIn(S.lines.high);
-  for (const e of [lLow, lHigh]) if (e != null && e >= lo - 8 && e <= hi + 8) { lo = Math.min(lo, e); hi = Math.max(hi, e); }
-  lo = Math.floor(lo - 1); hi = Math.ceil(hi + 1);
-  const x = m => L + (m / span) * (W - L - R), y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  if (!all.length) return { svg: "", G: null };
+  let lo = Math.min(...all), hi = Math.max(...all), step;
+  if (P.kind === "temp") {
+    const lLow = lineIn(S.lines.low), lHigh = lineIn(S.lines.high);
+    for (const e of [lLow, lHigh]) if (e != null && e >= lo - 8 && e <= hi + 8) { lo = Math.min(lo, e); hi = Math.max(hi, e); }
+    lo = Math.floor(lo - 1); hi = Math.ceil(hi + 1);
+    const rng = hi - lo; step = rng > 45 ? 10 : rng > 22 ? 5 : rng > 9 ? 2 : 1;
+  } else if (P.fixed) { [lo, hi] = P.fixed; step = H < 300 ? 25 : 20; }
+  else {
+    const minTop = { precip: precipU() === "in" ? 0.2 : 4, wind: 20, cape: 500, srh: 100 }[P.kind] || 1;
+    lo = Math.min(0, lo); hi = Math.max(hi * 1.08, minTop);
+    step = niceStep(hi - lo, H < 300 ? 4 : 5);
+    hi = Math.ceil(hi / step) * step; lo = Math.floor(lo / step) * step;
+  }
+  const pb = H - B, x = m => L + (m / span) * (W - L - R), y = v => T + (1 - (v - lo) / (hi - lo)) * (pb - T);
   const path = pts => { let d = "", prev = null; for (const p of pts) { d += `${!prev || p.m - prev.m > 90 ? "M" : "L"}${x(p.m).toFixed(1)},${y(p.v).toFixed(1)}`; prev = p; } return d; };
-
-  // Y grid
-  const rng = hi - lo, step = rng > 45 ? 10 : rng > 22 ? 5 : rng > 9 ? 2 : 1;
+  const dec = step < 0.1 ? 2 : step < 1 ? 1 : 0;
   let grid = "";
-  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step)
-    grid += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(255,255,255,${v === 0 && S.unit === "C" || v === 32 && S.unit === "F" ? ".22" : ".07"})"/><text x="${L - 7}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="rgba(226,231,255,.5)">${v}°</text>`;
-  // X labels
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) {
+    const strong = P.kind === "temp" ? (v === 0 && S.unit === "C" || v === 32 && S.unit === "F") : v === 0;
+    grid += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(255,255,255,${strong ? ".22" : ".07"})"/><text x="${L - 7}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="rgba(226,231,255,.5)">${v.toFixed(dec)}${P.kind === "temp" ? "°" : P.kind === "pct" ? "%" : ""}</text>`;
+  }
+  const uLbl = P.kind === "temp" || P.kind === "pct" ? "" : `<text x="${L - 7}" y="${T - 6}" text-anchor="end" font-size="10" font-weight="600" fill="rgba(226,231,255,.45)">${esc(unitOf(pk))}</text>`;
   let xl = "";
   const lab = (m, t, bold) => `<text x="${x(m)}" y="${H - 8}" text-anchor="middle" font-size="11" font-weight="${bold ? 700 : 500}" fill="${bold ? "#fff" : "rgba(226,231,255,.5)"}">${t}</text>`;
-  const vline = (m, a) => `<line x1="${x(m)}" x2="${x(m)}" y1="${T}" y2="${H - B}" stroke="rgba(255,255,255,${a})"/>`;
+  const vline = (m, a) => `<line x1="${x(m)}" x2="${x(m)}" y1="${T}" y2="${pb}" stroke="rgba(255,255,255,${a})"/>`;
   if (!multi) {
     const every = W < 520 ? 6 : 3;
-    for (let h = 0; h <= 24; h += every) {
-      const t = h % 24 === 0 ? "12a" : h === 12 ? "12p" : h < 12 ? `${h}a` : `${h - 12}p`;
-      xl += vline(h * 60, ".04") + lab(h * 60, t);
-    }
+    for (let h = 0; h <= 24; h += every) xl += vline(h * 60, ".04") + lab(h * 60, h % 24 === 0 ? "12a" : h === 12 ? "12p" : h < 12 ? `${h}a` : `${h - 12}p`);
   } else {
     const ti = todayIdx() - S.start, perDay = (W - L - R) / S.range;
     for (let i = 0; i < S.range; i++) {
       if (i) xl += vline(i * 1440, ".14");
       if (perDay > 70 && S.range <= 7) xl += vline(i * 1440 + 720, ".04");
       const d = D.dates[S.start + i]; if (!d) continue;
-      const t = perDay > 52 ? dayShort(d) : perDay > 22 ? String(dObj(d).getUTCDate()) : (i % 2 ? "" : String(dObj(d).getUTCDate()));
-      xl += lab(i * 1440 + 720, t, i === ti);
+      xl += lab(i * 1440 + 720, perDay > 52 ? dayShort(d) : perDay > 22 ? String(dObj(d).getUTCDate()) : (i % 2 ? "" : String(dObj(d).getUTCDate())), i === ti);
     }
   }
-  // Now
   const nm = nowMin() - S.start * 1440;
-  const nowSvg = nm > 0 && nm < span ? `<rect x="${L}" y="${T}" width="${Math.max(0, x(nm) - L)}" height="${H - T - B}" fill="rgba(255,255,255,.035)"/>
-    <line x1="${x(nm)}" x2="${x(nm)}" y1="${T}" y2="${H - B}" stroke="rgba(255,255,255,.45)" stroke-dasharray="2 3"/>
+  const nowSvg = nm > 0 && nm < span ? `<rect x="${L}" y="${T}" width="${Math.max(0, x(nm) - L)}" height="${pb - T}" fill="rgba(255,255,255,.035)"/>
+    <line x1="${x(nm)}" x2="${x(nm)}" y1="${T}" y2="${pb}" stroke="rgba(255,255,255,.45)" stroke-dasharray="2 3"/>
     <text x="${x(nm) + 4}" y="${T + 10}" font-size="10.5" fill="rgba(255,255,255,.8)">now</text>` : "";
-  // Spread band (min–max of the shown models, not counting Blend)
   let band = "";
-  const ms = series.filter(s => s.id !== "blend");
-  if (S.spread && ms.length >= 2) {
+  if (S.spread && series.length >= 2) {
     const byM = new Map();
-    for (const s of ms) for (const p of s.pts) { const a = byM.get(p.m); a ? a.push(p.v) : byM.set(p.m, [p.v]); }
-    const keys = [...byM.keys()].sort((a, b) => a - b);
+    for (const s of series) for (const p of s.pts) { const a = byM.get(p.m); a ? a.push(p.v) : byM.set(p.m, [p.v]); }
     let run = [];
-    const flush = () => {
-      if (run.length > 1) band += `<path d="M${run.map(r => `${x(r.m).toFixed(1)},${y(r.hi).toFixed(1)}`).join("L")}L${run.slice().reverse().map(r => `${x(r.m).toFixed(1)},${y(r.lo).toFixed(1)}`).join("L")}Z" fill="rgba(150,165,255,.13)"/>`;
-      run = [];
-    };
-    for (const m of keys) {
+    const flush = () => { if (run.length > 1) band += `<path d="M${run.map(r => `${x(r.m).toFixed(1)},${y(r.hi).toFixed(1)}`).join("L")}L${run.slice().reverse().map(r => `${x(r.m).toFixed(1)},${y(r.lo).toFixed(1)}`).join("L")}Z" fill="rgba(150,165,255,.13)"/>`; run = []; };
+    for (const m of [...byM.keys()].sort((a, b) => a - b)) {
       const a = byM.get(m);
       if (a.length < 2 || (run.length && m - run[run.length - 1].m > 90)) { flush(); if (a.length < 2) continue; }
       run.push({ m, hi: Math.max(...a), lo: Math.min(...a) });
     }
     flush();
   }
-  const edge = (v, col, lbl) => v == null || v < lo || v > hi ? "" :
-    `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${col}" stroke-width="1.4" stroke-dasharray="6 4" opacity=".95"/>
-     <text x="${W - R - 3}" y="${y(v) - 5}" text-anchor="end" font-size="11" font-weight="700" fill="${col}">${lbl}</text>`;
-  // Lines: models first, Blend on top
-  const lines = series.filter(s => s.id !== "blend").map(s =>
-    `<path data-line="${s.id}" d="${path(s.pts)}" fill="none" stroke="${colorOf(s.id)}" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round" opacity=".92"/>`).join("");
-  const bl = series.find(s => s.id === "blend");
-  const blend = bl ? `<path data-line="blend" d="${path(bl.pts)}" fill="none" stroke="rgba(255,255,255,.7)" stroke-width="1.8" stroke-dasharray="5 4"/>` : "";
-  // Day's extremes (single day): mean of the shown models
+  const hline = (v, col, lbl, dash = "6 4", op = ".95") => v == null || v < lo || v > hi ? "" :
+    `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${col}" stroke-width="1.3" stroke-dasharray="${dash}" opacity="${op}"/>
+     <text x="${W - R - 3}" y="${y(v) - 5}" text-anchor="end" font-size="10.5" font-weight="700" fill="${col}" opacity="${op}">${lbl}</text>`;
+  let refs = "";
+  if (P.kind === "temp") { const a = lineIn(S.lines.low), b = lineIn(S.lines.high); refs = hline(a, "#5ec8ff", `≤${fmt(a)}°`) + hline(b, "#ff9f43", `≥${fmt(b)}°`); }
+  if (P.guides) refs = P.guides.map(([v, t]) => hline(v, "rgba(255,200,120,.75)", `${v} ${t}`, "3 4", ".8")).join("");
+  const lines = series.map(s => `<path data-line="${s.id}" d="${path(s.pts)}" fill="none" stroke="${colorOf(s.id)}" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round" opacity=".92"/>`).join("");
   let ext = "";
-  if (!multi) {
-    const e = dayExt(S.start);
-    if (e) ext = `<circle cx="${x(e.hiM - S.start * 1440)}" cy="${y(cv(e.hi))}" r="5.5" fill="none" stroke="#ff9f43" stroke-width="2"/>
-                  <circle cx="${x(e.loM - S.start * 1440)}" cy="${y(cv(e.lo))}" r="5.5" fill="none" stroke="#5ec8ff" stroke-width="2"/>`;
+  if (!multi && P.kind === "temp") {
+    const e = dayExt(pk, S.start);
+    if (e) ext = `<circle cx="${x(e.hiM - S.start * 1440)}" cy="${y(cvT(e.hi))}" r="5.5" fill="none" stroke="#ff9f43" stroke-width="2"/>
+                  <circle cx="${x(e.loM - S.start * 1440)}" cy="${y(cvT(e.lo))}" r="5.5" fill="none" stroke="#5ec8ff" stroke-width="2"/>`;
   }
-  const G = { W, H, L, R, T, B, lo, hi, x, y, span, series, multi };
-  const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Hourly temperature by model" style="touch-action:none">
-    ${grid}${xl}${nowSvg}${band}
-    ${edge(lLow, "#5ec8ff", `≤${fmt(lLow)}°`)}${edge(lHigh, "#ff9f43", `≥${fmt(lHigh)}°`)}
-    ${lines}${blend}${ext}
+  // Precipitation type strip: colour = most common type, opacity = share of models with precipitation that hour
+  let strip = "";
+  if (isPrecip) {
+    const ids = series.map(s => s.id), sy = pb + 6, ws = S.start * 1440, step60 = (W - L - R) / (S.range * 24);
+    strip = `<text x="${L - 7}" y="${sy + 7}" text-anchor="end" font-size="9.5" fill="rgba(226,231,255,.45)">type</text>`;
+    for (let k = 0; k < D.mins.length; k++) {
+      const m = D.mins[k] - ws; if (m <= 0 || m > S.range * 1440) continue;
+      const c = { rain: 0, snow: 0, mix: 0 }; let n = 0;
+      for (const id of ids) { const t = ptype(id, k); if (D.raw.precipitation[id]?.[k] != null) n++; if (t) c[t]++; }
+      const wet = c.rain + c.snow + c.mix; if (!wet || !n) continue;
+      const t = Object.entries(c).sort((a, b) => b[1] - a[1])[0][0];
+      strip += `<rect x="${(x(m) - step60).toFixed(1)}" y="${sy}" width="${Math.max(1, step60 - 0.6).toFixed(1)}" height="8" rx="1.5" fill="${PT_COLOR[t]}" opacity="${(0.25 + 0.75 * wet / n).toFixed(2)}"/>`;
+    }
+  }
+  const G = { W, H, L, R, T, B, pb, lo, hi, x, y, span, series, multi, pk };
+  const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(P.label)} by model" style="touch-action:none">
+    ${grid}${uLbl}${xl}${nowSvg}${band}${refs}${lines}${ext}${strip}
     <g class="xh"></g>
-    <rect class="hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/>
+    <rect class="hit" x="${L}" y="${T}" width="${W - L - R}" height="${pb - T}" fill="transparent"/>
   </svg>`;
   return { svg, G };
 }
-function dayExt(i) {
-  const D = S.data;
-  if (S.shown.has("blend") && D.daily.blend?.[i]) return D.daily.blend[i];
-  const ids = modelIds(visible()).filter(id => D.daily[id][i]);
-  if (!ids.length) return null;
-  // Mean of the shown models, hour by hour
+// Mean of the shown models, hour by hour, then the day's high/low of that mean (raw units)
+function dayExt(pk, i, ids) {
+  const D = S.data, v = PARAMS[pk].v; ids = ids || visibleFor(v);
   const byM = new Map();
-  for (const id of ids) for (const p of D.pts[id]) if (p.m >= i * 1440 && p.m < (i + 1) * 1440) { const a = byM.get(p.m); a ? a.push(p.v) : byM.set(p.m, [p.v]); }
+  for (const id of ids) { const a = D.raw[v][id]; for (let k = 0; k < a.length; k++) { const m = D.mins[k]; if (m >= i * 1440 && m < (i + 1) * 1440 && a[k] != null) { const b = byM.get(m); b ? b.push(a[k]) : byM.set(m, [a[k]]); } } }
+  if (byM.size < 18) return null;
   let hi = null, lo = null;
-  for (const [m, a] of byM) { const v = a.reduce((s, b) => s + b, 0) / a.length; if (!hi || v > hi.v) hi = { m, v }; if (!lo || v < lo.v) lo = { m, v }; }
-  return hi && { hi: hi.v, hiM: hi.m, lo: lo.v, loM: lo.m };
+  for (const [m, a] of byM) { const x = mean(a); if (!hi || x > hi.v) hi = { m, v: x }; if (!lo || x < lo.v) lo = { m, v: x }; }
+  return { hi: hi.v, hiM: hi.m, lo: lo.v, loM: lo.m };
+}
+// Per-day consensus value for the day strip / table (display units)
+function dayConsensus(pk, i) {
+  const v = varOf(pk), agg = aggOf(pk), c = conv(pk), ids = visibleFor(v);
+  const vals = ids.map(id => dayAgg(v, agg, id, i)).filter(Boolean);
+  if (!vals.length) return null;
+  if (agg === "hilo") return { hi: c(mean(vals.map(e => e.hi))), lo: c(mean(vals.map(e => e.lo))), n: vals.length };
+  return { v: c(mean(vals.map(e => e.v))), n: vals.length, wet: vals.filter(e => e.v >= 0.5).length };
 }
 
 function chartTitle() {
@@ -250,56 +401,95 @@ function chartTitle() {
   return `${dayShort(D.dates[S.start])} – ${dayShort(D.dates[S.start + S.range - 1])}${S.start <= t && t < S.start + S.range ? `<span class="tag">incl. today</span>` : ""}`;
 }
 function summaryHTML() {
-  const D = S.data, U = `°${S.unit}`;
-  if (S.range === 1) {
-    const i = S.start, e = dayExt(i);
-    const days = modelIds(visible()).map(id => D.daily[id][i]).filter(Boolean);
-    const dis = days.length > 1 ? ` · models differ by <b>${fmt(cv(Math.max(...days.map(d => d.hi))) - cv(Math.min(...days.map(d => d.hi))))}°</b> on the high` : "";
-    return e ? `Avg high <b class="hi">${fmt(cv(e.hi))}${U}</b> ${hhmm(e.hiM - i * 1440)} · low <b class="lo">${fmt(cv(e.lo))}${U}</b> ${hhmm(e.loM - i * 1440)}${dis}` : "Not enough model data for this day.";
+  const D = S.data, pk = paramKey(), P = PARAMS[pk], U = unitOf(pk), v = varOf(pk), ids = visibleFor(v);
+  if (!ids.length) return "";
+  const i = S.start, days = Array.from({ length: S.range }, (_, k) => i + k);
+  const nm = id => esc(META(id).short);
+  if (P.kind === "temp") {
+    if (S.range === 1) {
+      const e = dayExt(pk, i), dd = ids.map(id => dayAgg(v, "hilo", id, i)).filter(Boolean);
+      const dis = dd.length > 1 ? ` · models differ by <b>${fmt(tDelta(Math.max(...dd.map(d => d.hi)) - Math.min(...dd.map(d => d.hi))))}°</b> on the high` : "";
+      return e ? `Avg high <b class="hi">${fmt(cvT(e.hi))}${U}</b> ${hhmm(e.hiM - i * 1440)} · low <b class="lo">${fmt(cvT(e.lo))}${U}</b> ${hhmm(e.loM - i * 1440)}${dis}` : "Not enough model data for this day.";
+    }
+    const all = windowSeries().flatMap(s => s.pts.map(p => p.v));
+    return `Models range <b class="lo">${fmt(Math.min(...all))}°</b> to <b class="hi">${fmt(Math.max(...all))}${U}</b>`;
   }
-  const v = windowSeries().flatMap(s => s.pts.map(p => p.v));
-  return v.length ? `Models range <b class="lo">${fmt(Math.min(...v))}°</b> to <b class="hi">${fmt(Math.max(...v))}${U}</b>` : "";
+  // Window totals / peaks per model
+  const per = ids.map(id => {
+    const a = D.raw[v][id], ws = i * 1440, we = (i + S.range) * 1440; let sum = 0, mx = null, n = 0, mm = 0;
+    for (let k = 0; k < a.length; k++) { const m = D.mins[k]; if (m <= ws || m > we || a[k] == null) continue; n++; sum += a[k]; if (mx == null || a[k] > mx) { mx = a[k]; mm = m; } }
+    return n ? { id, sum, mx, mm, avg: sum / n } : null;
+  }).filter(Boolean);
+  if (!per.length) return "";
+  const c = conv(pk), top = per.slice().sort((a, b) => b.mx - a.mx)[0];
+  if (pk === "cloud") { const av = per.map(p => p.avg); return `Avg cloud <b>${Math.round(mean(av))}%</b> · models range ${Math.round(Math.min(...av))}–${Math.round(Math.max(...av))}%`; }
+  if (pk === "precip") {
+    const tot = per.map(p => c(p.sum)), wet = per.filter(p => (S.mode.precip === "snow" ? p.sum >= 0.2 : p.sum >= 0.5)).length;
+    return `Avg total <b>${fv(pk, mean(tot))} ${U}</b> · <b>${wet} of ${per.length}</b> models ${S.mode.precip === "snow" ? "snow" : "wet"} · range ${fv(pk, Math.min(...tot))}–${fv(pk, Math.max(...tot))} ${U}`;
+  }
+  if (pk === "wind") return `Avg peak ${S.mode.wind === "gust" ? "gust" : "wind"} <b>${fv(pk, c(mean(per.map(p => p.mx))))} ${U}</b> · strongest <b>${fv(pk, c(top.mx))} ${U}</b> (${nm(top.id)}, ${hhmm(top.mm - i * 1440, S.range > 1)})`;
+  if (pk === "cape") return `Peak <b>${Math.round(top.mx)} J/kg</b> (${nm(top.id)}, ${hhmm(top.mm - i * 1440, S.range > 1)}) · avg peak ${Math.round(mean(per.map(p => p.mx)))} J/kg`;
+  if (pk === "srh") return `Estimated 0–3 km SRH · peak <b>${Math.round(top.mx)} m²/s²</b> (${nm(top.id)}, ${hhmm(top.mm - i * 1440, S.range > 1)})`;
+  return "";
 }
 
 // ---------- Readout (doubles as the legend) ----------
 function valueAt(G, id, minute) { const s = G.series.find(s => s.id === id); return s ? s.pts.find(p => p.m === minute) || null : null; }
+function extraFor(pk, id, k) {
+  const R = S.data.raw;
+  if (pk === "precip" && S.mode.precip !== "snow") { const t = ptype(id, k); return t ? `<i class="pt" style="background:${PT_COLOR[t]}" title="${PT_LABEL[t]}"></i>` : ""; }
+  if (pk === "wind") { const d = R.wind_direction_10m?.[id]?.[k]; return d != null ? `<i class="wd" style="transform:rotate(${d + 180}deg)" title="from ${Math.round(d)}°">↑</i>` : ""; }
+  return "";
+}
 function readoutHTML(G, minute) {
-  if (!G) return `<div class="rempty">No models are switched on.<br><button class="btn" data-open-models style="margin:10px auto 0">Choose models</button></div>`;
-  const U = `°${S.unit}`, D = S.data;
+  if (!G) return `<div class="rempty">${S.tab === "srh" ? srhNote() : "No models with this data are switched on."}<br><button class="btn" data-open-models style="margin:10px auto 0">Choose models</button></div>`;
+  const pk = G.pk, U = unitOf(pk), D = S.data;
   const rows = G.series.map(s => ({ id: s.id, p: s.pts.find(p => p.m === minute) }));
   rows.sort((a, b) => (b.p ? b.p.v : -1e9) - (a.p ? a.p.v : -1e9));
   const mv = rows.filter(r => r.p).map(r => r.p.v);
-  const mean = mv.length ? mv.reduce((a, b) => a + b, 0) / mv.length : null;
   let sel = "";
-  if (S.sel) {
-    const m = META(S.sel), p = valueAt(G, S.sel, minute), di = S.start + Math.floor(minute / 1440), e = D.daily[S.sel]?.[Math.min(di, D.dates.length - 1)];
+  if (S.sel && rows.some(r => r.id === S.sel)) {
+    const m = META(S.sel), p = valueAt(G, S.sel, minute), di = Math.min(S.start + Math.floor(minute / 1440), D.dates.length - 1);
+    const v = varOf(pk), e = dayAgg(v, aggOf(pk), S.sel, di), c = conv(pk);
+    const dayTxt = !e ? "" : e.hi != null
+      ? `<span>Day high <b style="color:#ffb38a">${fv(pk, c(e.hi))}</b> at ${pad(Math.floor(e.hiM / 60) % 24)}:00</span><span>Low <b style="color:#8fd3ff">${fv(pk, c(e.lo))}</b> at ${pad(Math.floor(e.loM / 60) % 24)}:00</span>`
+      : `<span>${dayShort(D.dates[di])} ${aggOf(pk) === "sum" ? "total" : aggOf(pk) === "mean" ? "average" : "peak"} <b>${fv(pk, c(e.v))} ${U}</b></span>`;
     sel = `<div class="rsel"><span class="rdot" style="background:${colorOf(S.sel)}"></span><b>${esc(m.name)}</b>
-      <div class="rbig">${p ? fmt(p.v) + U : "—"}</div>
+      <div class="rbig">${p ? fv(pk, p.v) + (PARAMS[pk].kind === "temp" ? U.slice(1) : " " + U) : "—"}</div>
       <small>${esc(m.provider)} · ${esc(m.res)} grid${p ? "" : " · no data at this hour"}</small>
-      ${e ? `<div class="rhl"><span>Day high <b style="color:#ffb38a">${fmt(cv(e.hi))}°</b> at ${pad(Math.floor(e.hiM / 60) % 24)}:00</span><span>Low <b style="color:#8fd3ff">${fmt(cv(e.lo))}°</b> at ${pad(Math.floor(e.loM / 60) % 24)}:00</span></div>` : ""}</div>`;
+      ${dayTxt ? `<div class="rhl">${dayTxt}</div>` : ""}</div>`;
   }
-  return `<div class="rhead"><b>${hhmm(minute, G.multi)}</b><small>${mv.length > 1 ? `avg <b>${fmt(mean)}°</b> · spread <b>${fmt(Math.max(...mv) - Math.min(...mv))}°</b>` : "local time"}</small></div>
+  const lbl = cumulative(pk) ? "total so far" : "";
+  return `<div class="rhead"><b>${hhmm(minute, G.multi)}${lbl ? ` <small style="font-weight:500">${lbl}</small>` : ""}</b><small>${mv.length > 1 ? `avg <b>${fv(pk, mean(mv))}</b> · spread <b>${fv(pk, Math.max(...mv) - Math.min(...mv))}</b>${PARAMS[pk].kind === "temp" ? "" : " " + esc(U)}` : esc(U)}</small></div>
     ${sel}<div class="rlist">${rows.map(r => `<button class="rrow${S.sel === r.id ? " sel" : S.sel ? " dim" : ""}" data-id="${r.id}" title="${esc(META(r.id).name)}">
-      <i class="rdot" style="background:${colorOf(r.id)}"></i><span>${esc(META(r.id).short)}</span><b>${r.p ? fmt(r.p.v) + "°" : "–"}</b></button>`).join("")}</div>`;
+      <i class="rdot" style="background:${colorOf(r.id)}"></i><span>${esc(META(r.id).short)}</span>${r.p ? extraFor(pk, r.id, r.p.k) : ""}<b>${r.p ? fv(pk, r.p.v) : "–"}</b></button>`).join("")}</div>
+    ${pk === "precip" && S.mode.precip !== "snow" ? `<div class="ptkey"><span><i class="pt" style="background:${PT_COLOR.rain}"></i>Rain</span><span><i class="pt" style="background:${PT_COLOR.snow}"></i>Snow</span><span><i class="pt" style="background:${PT_COLOR.mix}"></i>Mix</span></div>` : ""}
+    ${pk === "srh" ? `<div class="srhnote">${srhNote()}</div>` : ""}`;
+}
+function srhNote() {
+  const st = S.data?.srhState;
+  if (st === "loading" || st == null) return "Loading upper-air winds for the helicity estimate…";
+  if (st === "none") return "No model offers enough upper-air wind data here to estimate helicity.";
+  if (st === "error") return `Couldn't load upper-air winds: ${esc(S.data.srhErr || "")}`;
+  return "Estimated 0–3 km storm-relative helicity (right-moving supercell motion), computed from each model's pressure-level winds. Open-Meteo doesn't publish the models' own helicity, so treat this as a guide. Next 8 days only.";
 }
 function drawCrosshair(scope, minute) {
-  const G = scope._G;
-  const ro = scope.querySelector(".readout");
+  const G = scope._G, ro = scope.querySelector(".readout");
   if (!G) { if (ro) ro.innerHTML = readoutHTML(null); return; }
   S.min = minute;
-  const { x, y, T, H, B } = G;
-  const ids = S.sel ? [S.sel] : G.series.map(s => s.id);
+  const { x, y, T, pb } = G;
+  const ids = S.sel && G.series.some(s => s.id === S.sel) ? [S.sel] : G.series.map(s => s.id);
   let dots = "";
-  for (const id of ids) { const p = valueAt(G, id, minute); if (p) dots += `<circle cx="${x(p.m)}" cy="${y(p.v)}" r="${S.sel ? 5 : 3.2}" fill="${colorOf(id)}" stroke="#0a0e22" stroke-width="1.5"/>`; }
+  for (const id of ids) { const p = valueAt(G, id, minute); if (p) dots += `<circle cx="${x(p.m)}" cy="${y(p.v)}" r="${ids.length === 1 ? 5 : 3.2}" fill="${colorOf(id)}" stroke="#0a0e22" stroke-width="1.5"/>`; }
   const xh = scope.querySelector(".xh");
-  if (xh) xh.innerHTML = `<line x1="${x(minute)}" x2="${x(minute)}" y1="${T}" y2="${H - B}" stroke="rgba(255,255,255,.6)"/>${dots}`;
+  if (xh) xh.innerHTML = `<line x1="${x(minute)}" x2="${x(minute)}" y1="${T}" y2="${pb}" stroke="rgba(255,255,255,.6)"/>${dots}`;
   if (ro) ro.innerHTML = readoutHTML(G, minute);
 }
 function defaultMinute() {
   const span = S.range * 1440, nm = nowMin() - S.start * 1440;
   if (nm >= 0 && nm < span) return Math.round(nm / 60) * 60;
-  if (S.range === 1) { const e = dayExt(S.start); if (e) return e.hiM - S.start * 1440; }
-  return 720;
+  if (S.range === 1 && PARAMS[paramKey()].kind === "temp") { const e = dayExt(paramKey(), S.start); if (e) return e.hiM - S.start * 1440; }
+  return S.range === 1 ? 900 : 720;
 }
 function applyHighlight(scope) {
   scope.querySelectorAll("[data-line]").forEach(el => {
@@ -309,10 +499,7 @@ function applyHighlight(scope) {
   });
 }
 function scopes() { return [$("view"), document.querySelector(".fsbox")].filter(Boolean); }
-function selectModel(id) {
-  S.sel = S.sel === id ? "" : id;
-  for (const sc of scopes()) { applyHighlight(sc); drawCrosshair(sc, S.min); }
-}
+function selectModel(id) { S.sel = S.sel === id ? "" : id; for (const sc of scopes()) { applyHighlight(sc); drawCrosshair(sc, S.min); } }
 
 // ---------- Models sheet ----------
 function presetIds(p) {
@@ -325,29 +512,40 @@ function applyPreset(p) { S.shown = new Set(presetIds(p)); S.preset = p; saveSho
 function saveShown() { LS.set("shown", [...S.shown]); LS.set("preset", S.preset); }
 function renderModelsSheet() {
   const D = S.data; if (!D) return;
-  const avail = D.order, on = avail.filter(id => S.shown.has(id)).length;
-  $("scount").textContent = `${on} of ${avail.length} on`;
+  const pk = paramKey(), v = S.tab === "overview" ? "temperature_2m" : varOf(pk), ids = avail(v), on = ids.filter(id => S.shown.has(id)).length;
+  $("scount").textContent = `${on} of ${ids.length} on${S.tab !== "overview" ? ` · ${PARAMS[pk].label.toLowerCase()}` : ""}`;
   document.querySelectorAll("#mpresets button").forEach(b => b.classList.toggle("on", b.dataset.p === S.preset));
-  const i = S.start;
+  const agg = S.tab === "overview" ? "hilo" : aggOf(pk), c = S.tab === "overview" ? cvT : conv(pk), vp = S.tab === "overview" ? "temp" : pk;
   let html = "", prov = "";
-  for (const id of avail) {
+  for (const id of ids) {
     const m = MODEL_BY_ID[id];
     if (m.provider !== prov) {
       prov = m.provider;
-      const grp = avail.filter(x => MODEL_BY_ID[x].provider === prov), allOn = grp.every(x => S.shown.has(x));
+      const grp = ids.filter(x => MODEL_BY_ID[x].provider === prov), allOn = grp.every(x => S.shown.has(x));
       html += `<div class="mgrp"><span>${esc(prov)}</span>${grp.length > 1 ? `<button data-grp="${esc(prov)}" data-on="${allOn ? 0 : 1}">${allOn ? "Hide all" : "Show all"}</button>` : ""}</div>`;
     }
-    const e = D.daily[id][i];
+    const e = dayAgg(v, agg, id, S.start);
+    const val = !e ? "" : e.hi != null ? `<span class="h">${fv(vp, c(e.hi))}</span><span class="l">${fv(vp, c(e.lo))}</span>` : `<span class="h">${fv(vp, c(e.v))}</span>`;
     html += `<label class="mrow"><i style="background:${m.color}"></i><span class="mn"><b>${esc(m.short)}</b><small>${esc(m.name)} · ${esc(m.res)}</small></span>
-      ${e ? `<span class="mhl"><span class="h">${fmt(cv(e.hi))}°</span><span class="l">${fmt(cv(e.lo))}°</span></span>` : ""}
+      ${val ? `<span class="mhl">${val}</span>` : ""}
       <input type="checkbox" class="sw" data-id="${id}"${S.shown.has(id) ? " checked" : ""} aria-label="Show ${esc(m.short)}"></label>`;
   }
+  if (!ids.length) html = `<div class="rempty">${S.tab === "srh" ? srhNote() : "No model has this data here."}</div>`;
   const keep = $("mlist").scrollTop;
   $("mlist").innerHTML = html;
   $("mlist").scrollTop = keep;
 }
+function openModal(id) { $(id).hidden = false; document.body.classList.add("fs-open"); }
+function closeModal(id) { $(id).hidden = true; if (!document.querySelector(".modal:not([hidden])") && !document.querySelector(".fs")) document.body.classList.remove("fs-open"); }
+
+// ---------- Tabs, toolbar, day strip, table ----------
+function renderTabs() {
+  $("tabs").innerHTML = TABS.map(t => `<a href="#${t}" class="tab${S.tab === t ? " on" : ""}" role="tab" aria-selected="${S.tab === t}">${TAB_LABEL[t]}</a>`).join("");
+  const on = $("tabs").querySelector(".on");
+  if (on) { const bar = $("tabs"); const l = on.offsetLeft - bar.offsetLeft, r = l + on.offsetWidth; if (l < bar.scrollLeft || r > bar.scrollLeft + bar.clientWidth) bar.scrollTo({ left: Math.max(0, l - 40), behavior: "smooth" }); }
+}
 function renderToolbar() {
-  const ids = modelIds(visible());
+  const pk = paramKey(), ids = S.tab === "overview" ? visibleFor("temperature_2m") : visibleFor(varOf(pk));
   $("mcount").textContent = ids.length;
   $("mdots").innerHTML = ids.slice(0, 4).map(id => `<i style="background:${colorOf(id)}"></i>`).join("");
   $("optsBtn").classList.toggle("active", S.lines.low != null || S.lines.high != null);
@@ -355,51 +553,169 @@ function renderToolbar() {
   document.querySelectorAll(".unit button").forEach(b => b.classList.toggle("on", b.dataset.unit === S.unit));
   $("prevBtn").disabled = S.start <= 0;
   $("nextBtn").disabled = S.start + S.range >= S.data.dates.length;
+  const P = PARAMS[pk];
+  $("modes").innerHTML = P.modes ? P.modes.map(([k, l]) => `<button data-mode="${k}" class="${S.mode[pk] === k ? "on" : ""}">${l}</button>`).join("") : "";
+  $("modes").hidden = !P.modes;
 }
-function openModal(id) { $(id).hidden = false; document.body.classList.add("fs-open"); }
-function closeModal(id) { $(id).hidden = true; if (!document.querySelector(".modal:not([hidden])") && !document.querySelector(".fs")) document.body.classList.remove("fs-open"); }
-
-// ---------- Day strip & table ----------
+function dayCell(pk, i, compact) {
+  const c = dayConsensus(pk, i); if (!c) return "&nbsp;";
+  const P = PARAMS[pk];
+  if (c.hi != null) return `<span class="h">${Math.round(c.hi)}°</span> <span class="l">${Math.round(c.lo)}°</span>`;
+  if (pk === "precip") return `<span class="p">${fv(pk, c.v)}</span><small>${unitOf(pk)}</small>`;
+  if (P.kind === "pct") return `<span class="p">${Math.round(c.v)}%</span>`;
+  return `<span class="p">${Math.round(c.v)}</span>${compact ? "" : `<small>${esc(unitOf(pk))}</small>`}`;
+}
 function renderDays() {
-  const D = S.data, t = todayIdx();
+  const D = S.data, t = todayIdx(), pk = paramKey();
   $("days").innerHTML = D.dates.map((d, i) => {
-    const e = dayExt(i), inR = i >= S.start && i < S.start + S.range;
+    const inR = i >= S.start && i < S.start + S.range;
     return `<button class="day${i < t ? " past" : ""}${inR ? " in" : ""}" data-i="${i}" role="tab" aria-selected="${inR}">
       <div class="dn"><span>${i === t ? "Today" : WD[dObj(d).getUTCDay()]}</span></div><div class="dt">${MO[dObj(d).getUTCMonth()]} ${dObj(d).getUTCDate()}</div>
-      <div class="hl">${e ? `<span class="h">${Math.round(cv(e.hi))}°</span> <span class="l">${Math.round(cv(e.lo))}°</span>` : "&nbsp;"}</div></button>`;
+      <div class="hl">${dayCell(pk, i, true)}</div></button>`;
   }).join("");
 }
 function renderTable() {
-  const D = S.data, t = todayIdx(), ids = visible();
+  const D = S.data, t = todayIdx(), pk = paramKey(), v = varOf(pk), agg = aggOf(pk), c = conv(pk), ids = visibleFor(v), U = unitOf(pk);
+  const titles = { hilo: "Daily high / low", mean: "Daily average", sum: "Daily total", max: "Daily peak" };
+  $("tableTitle").textContent = `${titles[agg]} · ${PARAMS[pk].label}${pk === "wind" && S.mode.wind === "gust" ? " gusts" : pk === "precip" && S.mode.precip === "snow" ? " (snow)" : ""}`;
   const cls = i => `${i < t ? "past" : ""}${i >= S.start && i < S.start + S.range ? " in" : ""}`;
-  const cell = e => e ? `<span class="h">${fmt(cv(e.hi))}</span><br><span class="l">${fmt(cv(e.lo))}</span>` : `<span class="s">–</span>`;
-  let h = `<table class="dt"><thead><tr><th class="mcol">°${S.unit} · high<br>low</th>${D.dates.map((d, i) =>
+  const cell = e => !e ? `<span class="s">–</span>` : e.hi != null ? `<span class="h">${fv(pk, c(e.hi))}</span><br><span class="l">${fv(pk, c(e.lo))}</span>` : fv(pk, c(e.v));
+  let h = `<table class="dt"><thead><tr><th class="mcol">${esc(U)}${agg === "hilo" ? " · high<br>low" : ""}</th>${D.dates.map((d, i) =>
     `<th class="${cls(i)}" data-i="${i}">${i === t ? "Today" : WD[dObj(d).getUTCDay()]}<b>${dObj(d).getUTCDate()}</b></th>`).join("")}</tr></thead><tbody>`;
-  for (const id of ids) h += `<tr><th><i style="background:${colorOf(id)}"></i>${esc(META(id).short)}</th>${D.dates.map((_, i) => `<td class="${cls(i)}">${cell(D.daily[id][i])}</td>`).join("")}</tr>`;
-  const mids = modelIds(ids);
-  if (mids.length > 1) {
+  for (const id of ids) h += `<tr><th><i style="background:${colorOf(id)}"></i>${esc(META(id).short)}</th>${D.dates.map((_, i) => `<td class="${cls(i)}">${cell(dayAgg(v, agg, id, i))}</td>`).join("")}</tr>`;
+  if (ids.length > 1) {
     const stat = (label, f) => `<tr class="stat"><th>${label}</th>${D.dates.map((_, i) => {
-      const es = mids.map(id => D.daily[id][i]).filter(Boolean);
+      const es = ids.map(id => dayAgg(v, agg, id, i)).filter(Boolean);
       return `<td class="${cls(i)}">${es.length > 1 ? f(es) : "–"}</td>`; }).join("")}</tr>`;
-    const mean = a => a.reduce((s, b) => s + b, 0) / a.length;
-    h += stat("Average", es => `<span class="h">${fmt(cv(mean(es.map(e => e.hi))))}</span><br><span class="l">${fmt(cv(mean(es.map(e => e.lo))))}</span>`);
-    const k = S.unit === "F" ? 1.8 : 1;
-    h += stat("Spread", es => `${fmt((Math.max(...es.map(e => e.hi)) - Math.min(...es.map(e => e.hi))) * k)}<br>${fmt((Math.max(...es.map(e => e.lo)) - Math.min(...es.map(e => e.lo))) * k)}`);
+    const sp = a => Math.max(...a) - Math.min(...a);
+    if (agg === "hilo") {
+      h += stat("Average", es => `<span class="h">${fv(pk, c(mean(es.map(e => e.hi))))}</span><br><span class="l">${fv(pk, c(mean(es.map(e => e.lo))))}</span>`);
+      h += stat("Spread", es => `${fmt(tDelta(sp(es.map(e => e.hi))))}<br>${fmt(tDelta(sp(es.map(e => e.lo))))}`);
+    } else {
+      h += stat("Average", es => fv(pk, c(mean(es.map(e => e.v)))));
+      h += stat("Spread", es => fv(pk, c(Math.max(...es.map(e => e.v))) - c(Math.min(...es.map(e => e.v)))));
+      if (agg === "sum") h += stat("Models wet", es => `${es.filter(e => e.v >= (S.mode.precip === "snow" ? 0.2 : 0.5)).length}/${es.length}`);
+    }
   }
   $("table").innerHTML = h + "</tbody></table>";
+}
+
+// ---------- Overview ----------
+const ICON = {
+  sun: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5" fill="#ffd166"/><g stroke="#ffd166" stroke-width="2" stroke-linecap="round"><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></g></svg>`,
+  part: `<svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="4" fill="#ffd166"/><path d="M8 19h9a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6 1.6A3.2 3.2 0 0 0 8 19z" fill="#c9d3f5"/></svg>`,
+  cloud: `<svg viewBox="0 0 24 24"><path d="M7 19h10.5a4.5 4.5 0 0 0 .4-9 6 6 0 0 0-11.6 1.8A3.6 3.6 0 0 0 7 19z" fill="#aeb8dd"/></svg>`,
+  rain: `<svg viewBox="0 0 24 24"><path d="M7 15h10.5a4.5 4.5 0 0 0 .4-9 6 6 0 0 0-11.6 1.8A3.6 3.6 0 0 0 7 15z" fill="#aeb8dd"/><g stroke="#4cc9f0" stroke-width="2" stroke-linecap="round"><path d="M8 18l-1 3M12 18l-1 3M16 18l-1 3"/></g></svg>`,
+  snow: `<svg viewBox="0 0 24 24"><path d="M7 15h10.5a4.5 4.5 0 0 0 .4-9 6 6 0 0 0-11.6 1.8A3.6 3.6 0 0 0 7 15z" fill="#aeb8dd"/><g fill="#fff"><circle cx="8" cy="19" r="1.4"/><circle cx="12" cy="21" r="1.4"/><circle cx="16" cy="19" r="1.4"/></g></svg>`,
+  mix: `<svg viewBox="0 0 24 24"><path d="M7 15h10.5a4.5 4.5 0 0 0 .4-9 6 6 0 0 0-11.6 1.8A3.6 3.6 0 0 0 7 15z" fill="#aeb8dd"/><path d="M8 18l-1 3" stroke="#4cc9f0" stroke-width="2" stroke-linecap="round"/><circle cx="12.5" cy="20" r="1.4" fill="#fff"/><path d="M17 18l-1 3" stroke="#4cc9f0" stroke-width="2" stroke-linecap="round"/></svg>`,
+};
+function dayStats(i, ids) {
+  const D = S.data;
+  const T = ids.map(id => dayAgg("temperature_2m", "hilo", id, i)).filter(Boolean);
+  if (!T.length) return null;
+  const pr = ids.map(id => dayAgg("precipitation", "sum", id, i)).filter(Boolean);
+  const sn = ids.map(id => dayAgg("snowfall", "sum", id, i)).filter(Boolean);
+  const cl = ids.map(id => dayAgg("cloud_cover", "mean", id, i)).filter(Boolean);
+  const gu = ids.map(id => dayAgg("wind_gusts_10m", "max", id, i)).filter(Boolean);
+  const ca = ids.map(id => dayAgg("cape", "max", id, i)).filter(Boolean);
+  const p = pr.length ? mean(pr.map(e => e.v)) : 0, s = sn.length ? mean(sn.map(e => e.v)) : 0, cc = cl.length ? mean(cl.map(e => e.v)) : null;
+  const wet = pr.filter(e => e.v >= 0.5).length;
+  const icon = p >= 1 && wet * 2 >= pr.length ? (s >= 0.5 ? (s * 7 >= p * 0.6 ? "snow" : "mix") : "rain") : cc == null ? "part" : cc < 25 ? "sun" : cc < 70 ? "part" : "cloud";
+  const his = T.map(e => e.hi), los = T.map(e => e.lo);
+  return { n: T.length, hi: mean(his), lo: mean(los), hiMin: Math.min(...his), hiMax: Math.max(...his), loMin: Math.min(...los), loMax: Math.max(...los),
+           p, s, wet, np: pr.length, cloud: cc, gust: gu.length ? mean(gu.map(e => e.v)) : null, cape: ca.length ? Math.max(...ca.map(e => e.v)) : null, icon };
+}
+function agreeOf(spreadC) { return spreadC <= 2 ? ["High", "good"] : spreadC <= 4 ? ["Medium", "mid"] : ["Low", "bad"]; }
+function renderOverview() {
+  const D = S.data, t = todayIdx(), k = nowIdx(), ids = visibleFor("temperature_2m");
+  if (!ids.length) { $("overview").innerHTML = `<div class="card ovcard"><div class="rempty">No models are switched on.<br><button class="btn" data-open-models style="margin:10px auto 0">Choose models</button></div></div>`; return; }
+  const at = (v, id) => D.raw[v]?.[id]?.[k];
+  const avgNow = v => { const a = visibleFor(v).map(id => at(v, id)).filter(x => x != null); return a.length ? { v: mean(a), min: Math.min(...a), max: Math.max(...a), n: a.length } : null; };
+  const tn = avgNow("temperature_2m"), fl = avgNow("apparent_temperature"), dp = avgNow("dew_point_2m"), ws = avgNow("wind_speed_10m"), gs = avgNow("wind_gusts_10m"), cc = avgNow("cloud_cover");
+  // Precipitation in the next 24 h
+  const pIds = visibleFor("precipitation"); let start = null, tot = [], types = { rain: 0, snow: 0, mix: 0 };
+  for (const id of pIds) { let s = 0; for (let q = k + 1; q <= k + 24 && q < D.times.length; q++) { const x = D.raw.precipitation[id][q]; if (x != null) s += x; const ty = ptype(id, q); if (ty) types[ty]++; } tot.push(s); }
+  for (let q = k + 1; q <= k + 24 && q < D.times.length && start == null; q++) { const w = pIds.filter(id => ptype(id, q)).length; if (pIds.length && w * 2 >= pIds.length) start = q; }
+  const wet24 = tot.filter(s => s >= 0.5).length, mainType = Object.entries(types).sort((a, b) => b[1] - a[1])[0];
+  const precipLine = !pIds.length ? "" : start != null
+    ? `<b>${PT_LABEL[mainType[0]]}</b> likely from about <b>${D.times[start].slice(11, 16)}</b> · ${wet24} of ${pIds.length} models · avg <b>${fv("precip", cvP(mean(tot)))} ${precipU()}</b> next 24 h`
+    : wet24 ? `${wet24} of ${pIds.length} models show some precipitation in the next 24 h (avg ${fv("precip", cvP(mean(tot)))} ${precipU()})` : `Dry for the next 24 h in all ${pIds.length} models`;
+  const today = dayStats(t, ids), tmr = dayStats(t + 1, ids);
+  const U = `°${S.unit}`, wU = WIND_L[windU()];
+  const dayCard = (st, i, label) => {
+    if (!st) return "";
+    const [ag, cls] = agreeOf(st.hiMax - st.hiMin);
+    return `<button class="card ovday" data-goto="${i}">
+      <div class="ovdh"><span>${label}</span><span class="ic">${ICON[st.icon]}</span></div>
+      <div class="ovhl"><span class="h">${fmt(cvT(st.hi))}°</span><span class="l">${fmt(cvT(st.lo))}°</span></div>
+      <div class="ovsub">Highs ${fmt(cvT(st.hiMin))}–${fmt(cvT(st.hiMax))}° across ${st.n} models</div>
+      <div class="ovstats">
+        <span>Precip <b>${fv("precip", cvP(st.p))} ${precipU()}</b> <small>${st.wet}/${st.np} wet</small></span>
+        ${st.gust != null ? `<span>Gusts <b>${Math.round(cvW(st.gust))} ${wU}</b></span>` : ""}
+        ${st.cape != null ? `<span>CAPE <b>${Math.round(st.cape)}</b></span>` : ""}
+        <span>Agreement <b class="ag ${cls}">${ag}</b></span>
+      </div></button>`;
+  };
+  // Outlook
+  const rows = [];
+  for (let i = t; i < D.dates.length; i++) { const st = dayStats(i, ids); if (st) rows.push([i, st]); }
+  const gMin = Math.min(...rows.map(([, s]) => s.loMin)), gMax = Math.max(...rows.map(([, s]) => s.hiMax)), pct = v => ((v - gMin) / (gMax - gMin || 1) * 100).toFixed(1);
+  const outlook = rows.map(([i, s]) => {
+    const [ag, cls] = agreeOf(s.hiMax - s.hiMin), d = D.dates[i];
+    return `<button class="ovrow" data-goto="${i}">
+      <span class="od"><b>${i === t ? "Today" : WD[dObj(d).getUTCDay()]}</b><small>${MO[dObj(d).getUTCMonth()]} ${dObj(d).getUTCDate()}</small></span>
+      <span class="ic">${ICON[s.icon]}</span>
+      <span class="op">${s.p >= 0.1 ? `${fv("precip", cvP(s.p))}<small>${precipU()}</small>` : ""}${s.wet ? `<em>${s.wet}/${s.np} wet</em>` : ""}</span>
+      <span class="ol">${Math.round(cvT(s.lo))}°</span>
+      <span class="obar"><i class="rng" style="left:${pct(s.loMin)}%;right:${100 - pct(s.hiMax)}%"></i><i class="avg" style="left:${pct(s.lo)}%;right:${100 - pct(s.hi)}%"></i></span>
+      <span class="oh">${Math.round(cvT(s.hi))}°</span>
+      <span class="oa ${cls}" title="Model agreement: ${ag}"></span>
+    </button>`;
+  }).join("");
+  // Storm potential next 3 days
+  const capeIds = visibleFor("cape"); let pk = null;
+  for (const id of capeIds) { const a = D.raw.cape[id]; for (let q = k; q < Math.min(a.length, k + 72); q++) if (a[q] != null && (!pk || a[q] > pk.v)) pk = { v: a[q], id, q }; }
+  const capeTxt = !pk ? "No CAPE data from the shown models." : pk.v < 100 ? "Little or no thunderstorm energy in the next 3 days." :
+    `Peak CAPE <b>${Math.round(pk.v)} J/kg</b> ${dayShort(D.times[pk.q].slice(0, 10))} ${D.times[pk.q].slice(11, 16)} (${esc(META(pk.id).short)}) · ${pk.v >= 2500 ? "strong" : pk.v >= 1000 ? "moderate" : "weak"} instability`;
+  const metric = (label, val, sub) => `<div class="ovm"><span>${label}</span><b>${val}</b>${sub ? `<small>${sub}</small>` : ""}</div>`;
+  $("overview").innerHTML = `
+    <div class="ovgrid">
+      <div class="card ovnow">
+        <div class="ovnh"><span>Right now</span><small>Average of ${tn ? tn.n : 0} models · ${D.times[k].slice(11, 16)}</small></div>
+        <div class="ovbig">${tn ? `${fmt(cvT(tn.v))}<span>${U}</span>` : "–"}</div>
+        <div class="ovsub">${tn ? `Models ${fmt(cvT(tn.min))} to ${fmt(cvT(tn.max))}°` : ""}</div>
+        <div class="ovms">
+          ${metric("Feels like", fl ? fmt(cvT(fl.v)) + "°" : "–")}
+          ${metric("Dew point", dp ? fmt(cvT(dp.v)) + "°" : "–")}
+          ${metric("Wind", ws ? `${Math.round(cvW(ws.v))} <small>${wU}</small>` : "–", gs ? `gusts ${Math.round(cvW(gs.v))}` : "")}
+          ${metric("Cloud", cc ? Math.round(cc.v) + "%" : "–")}
+        </div>
+        <div class="ovp">${precipLine}</div>
+      </div>
+      <div class="ovdays">${dayCard(today, t, "Today")}${dayCard(tmr, t + 1, "Tomorrow")}</div>
+    </div>
+    <div class="card ovout">
+      <div class="thead"><h3>${rows.length}-day outlook</h3><span class="tsub">Bar = avg low→high · faint = all models · dot = agreement</span></div>
+      <div class="ovrows">${outlook}</div>
+    </div>
+    <div class="card ovstorm"><div class="ovnh"><span>Thunderstorm potential</span><small>next 3 days</small></div><div class="ovp">${capeTxt}</div>
+      <div class="ovlinks"><a href="#cape">Open CAPE chart →</a><a href="#srh">Helicity →</a></div></div>
+    <div class="ovfoot">Averages use the ${ids.length} models switched on · <button class="linkbtn" data-open-models>Change models</button></div>`;
 }
 
 // ---------- Render ----------
 function chartDims(el) {
   const W = Math.max(300, Math.round(el.clientWidth || 340));
-  const H = W < 600 ? Math.round(Math.max(240, W * 0.7)) : Math.round(Math.min(500, Math.max(300, W * 0.48)));
+  const H = W < 600 ? Math.round(Math.max(250, W * 0.72)) : Math.round(Math.min(500, Math.max(300, W * 0.48)));
   return { W, H };
 }
 function renderMain() {
+  if (S.tab === "overview") return;
   const scope = $("view"), host = $("chart");
   const { W, H } = chartDims(host);
   const { svg, G } = chartSVG(W, H);
-  host.innerHTML = svg; scope._G = G;
+  host.innerHTML = svg || `<div class="status">${S.tab === "srh" ? srhNote() : "None of the switched-on models have this data here."}</div>`;
+  scope._G = G;
   $("ctitle").innerHTML = chartTitle();
   $("gsum").innerHTML = summaryHTML();
   if (S.min == null || S.min > S.range * 1440) S.min = defaultMinute();
@@ -409,8 +725,15 @@ function renderMain() {
 }
 function renderAll() {
   if (!S.data) return;
-  if (S.sel && !visible().includes(S.sel)) S.sel = "";
-  renderHeader(); renderDays(); renderToolbar(); renderMain(); renderTable();
+  const ov = S.tab === "overview";
+  document.body.dataset.tab = S.tab;
+  $("overview").hidden = !ov; $("paramView").hidden = ov;
+  renderHeader(); renderTabs(); renderToolbar();
+  if (ov) renderOverview();
+  else {
+    if (S.tab === "srh" && !S.data.srhState) loadSRH();
+    renderDays(); renderMain(); renderTable();
+  }
   if (!$("modelsModal").hidden) renderModelsSheet();
 }
 function renderHeader() {
@@ -426,14 +749,23 @@ function tickClock() {
   const t = new Date(Date.now() + S.data.offset * 1000);
   $("clock").innerHTML = `<b>${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}</b>${esc(S.data.tzAbbr || S.data.tz || "")} local`;
 }
+function setTab(t) {
+  if (!TABS.includes(t)) t = "overview";
+  if (S.tab === t && S.data) return renderAll();
+  S.tab = t; S.min = null;
+  if (S.data && PARAMS[t]?.lazy && S.start > todayIdx() + 6) S.start = todayIdx();
+  if (S.data && t !== "overview") S.start = Math.max(0, Math.min(S.data.dates.length - S.range, S.start));
+  renderAll();
+  if (t !== "overview") window.scrollTo({ top: Math.min(window.scrollY, $("tabs").offsetTop - 70), behavior: "smooth" });
+}
+addEventListener("hashchange", () => { const h = location.hash.slice(1); if (TABS.includes(h)) setTab(h); });
 
 // ---------- Full-screen chart (drawn sideways on a portrait phone) ----------
 function fsSize() {
   const vw = innerWidth, vh = innerHeight, rot = vh > vw && vw < 760;
   const long = rot ? vh : vw, short = rot ? vw : vh;
   const panel = Math.min(280, Math.round(long * 0.32));
-  const W = Math.max(320, long - panel - 60), H = Math.max(200, short - 80);
-  return { rot, long, short, W, H };
+  return { rot, long, short, W: Math.max(320, long - panel - 60), H: Math.max(200, short - 80) };
 }
 function renderFS(box) {
   const fs = box.closest(".fs"), z = fsSize();
@@ -442,17 +774,15 @@ function renderFS(box) {
   const { svg, G } = chartSVG(z.W, z.H);
   box._G = G;
   box.innerHTML = `<button class="fsx" aria-label="Close">✕</button>
-    <div class="fsl"><div class="fsc"><div class="gsum"><b>${esc(S.loc.name)}</b> · ${chartTitle().replace(/<span class="tag[^>]*>.*?<\/span>/g, "")} · ${summaryHTML()}</div><div class="chart">${svg}</div></div>
+    <div class="fsl"><div class="fsc"><div class="gsum"><b>${esc(S.loc.name)} · ${esc(PARAMS[paramKey()].label)}</b> · ${chartTitle().replace(/<span class="tag[^>]*>.*?<\/span>/g, "")} · ${summaryHTML()}</div><div class="chart">${svg}</div></div>
     <div class="fsp"><div class="readout"></div></div></div>`;
   drawCrosshair(box, S.min ?? defaultMinute());
   applyHighlight(box);
 }
 function openFS() {
   const fs = document.createElement("div");
-  fs.className = "fs";
-  fs.innerHTML = `<div class="fsbox"></div>`;
-  document.body.appendChild(fs);
-  document.body.classList.add("fs-open");
+  fs.className = "fs"; fs.innerHTML = `<div class="fsbox"></div>`;
+  document.body.appendChild(fs); document.body.classList.add("fs-open");
   renderFS(fs.firstChild);
 }
 function closeFS() { document.querySelector(".fs")?.remove(); if (!document.querySelector(".modal:not([hidden])")) document.body.classList.remove("fs-open"); }
@@ -473,9 +803,7 @@ document.addEventListener("pointerdown", e => {
   move(e);
   try { svg.setPointerCapture(e.pointerId); } catch {}
   const up = () => { svg.removeEventListener("pointermove", move); svg.removeEventListener("pointerup", up); svg.removeEventListener("pointercancel", up); };
-  svg.addEventListener("pointermove", move);
-  svg.addEventListener("pointerup", up);
-  svg.addEventListener("pointercancel", up);
+  svg.addEventListener("pointermove", move); svg.addEventListener("pointerup", up); svg.addEventListener("pointercancel", up);
 });
 document.addEventListener("click", e => {
   const t = e.target;
@@ -483,15 +811,21 @@ document.addEventListener("click", e => {
   if (t.closest(".fsx")) return closeFS();
   const rr = t.closest(".rrow"); if (rr) return selectModel(rr.dataset.id);
   if (t.closest("[data-open-models]")) { renderModelsSheet(); return openModal("modelsModal"); }
+  const go = t.closest("[data-goto]");
+  if (go) { S.range = 1; LS.set("range", 1); S.start = +go.dataset.goto; location.hash = "temp"; return setTab("temp"); }
   const day = t.closest(".day, .dt thead th[data-i]"); if (day) return setStart(+day.dataset.i);
+  const md = t.closest("#modes button");
+  if (md) { S.mode[paramKey()] = md.dataset.mode; LS.set("mode", S.mode); S.sel = ""; return renderAll(); }
   const rb = t.closest("#range button");
   if (rb) { S.range = +rb.dataset.r; LS.set("range", S.range); if (S.range === 16 && S.start < todayIdx()) S.start = todayIdx(); return setStart(S.start); }
   const ub = t.closest(".unit button");
-  if (ub) { S.unit = ub.dataset.unit; LS.set("unit", S.unit); return renderAll(); }
+  if (ub) { S.unit = ub.dataset.unit; LS.set("unit", S.unit); syncUnitOpts(); return renderAll(); }
+  const uo = t.closest("[data-wu],[data-pu]");
+  if (uo) { if (uo.dataset.wu) { S.windU = uo.dataset.wu; LS.set("windU", S.windU); } else { S.precipU = uo.dataset.pu; LS.set("precipU", S.precipU); } syncUnitOpts(); return renderAll(); }
   const q = t.closest(".quick button[data-i]"); if (q) return loadLocation(q.classList.contains("recent") ? LS.get("recent", [])[+q.dataset.i] : QUICK[+q.dataset.i]);
   const mp = t.closest("#mpresets button"); if (mp) { applyPreset(mp.dataset.p); return renderAll(), renderModelsSheet(); }
   const mg = t.closest(".mgrp button[data-grp]");
-  if (mg) { const on = mg.dataset.on === "1"; S.data.order.filter(id => MODEL_BY_ID[id].provider === mg.dataset.grp).forEach(id => on ? S.shown.add(id) : S.shown.delete(id)); S.preset = "custom"; saveShown(); return renderAll(), renderModelsSheet(); }
+  if (mg) { const on = mg.dataset.on === "1"; MODELS.filter(m => m.provider === mg.dataset.grp).forEach(m => on ? S.shown.add(m.id) : S.shown.delete(m.id)); S.preset = "custom"; saveShown(); return renderAll(), renderModelsSheet(); }
   const cl = t.closest("[data-close]"); if (cl) return closeModal(cl.closest(".modal").id);
   if (t.classList.contains("modal")) return closeModal(t.id);
 });
@@ -501,11 +835,16 @@ $("mlist").addEventListener("change", e => {
   S.preset = "custom"; saveShown(); renderAll(); renderModelsSheet();
 });
 $("modelsBtn").onclick = () => { renderModelsSheet(); openModal("modelsModal"); };
+function syncUnitOpts() {
+  document.querySelectorAll("[data-wu]").forEach(b => b.classList.toggle("on", b.dataset.wu === windU()));
+  document.querySelectorAll("[data-pu]").forEach(b => b.classList.toggle("on", b.dataset.pu === precipU()));
+  document.querySelectorAll("#optsModal .u").forEach(u => u.textContent = `°${S.unit}`);
+}
 $("optsBtn").onclick = () => {
   $("spreadSw").checked = !!S.spread;
   $("lineLow").value = S.lines.low != null ? fmt(lineIn(S.lines.low)) : "";
   $("lineHigh").value = S.lines.high != null ? fmt(lineIn(S.lines.high)) : "";
-  document.querySelectorAll("#optsModal .u").forEach(u => u.textContent = `°${S.unit}`);
+  syncUnitOpts();
   openModal("optsModal");
 };
 $("spreadSw").onchange = () => { S.spread = $("spreadSw").checked; LS.set("spread", S.spread); renderMain(); };
@@ -526,11 +865,11 @@ function setStart(i) {
 }
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") { closeFS(); closeModal("modelsModal"); closeModal("optsModal"); hideSugg(); }
-  if (!S.data || /input|textarea/i.test(e.target.tagName) || document.querySelector(".modal:not([hidden])")) return;
-  if (e.key === "ArrowLeft" && !e.target.closest(".days")) setStart(S.start - S.range);
-  if (e.key === "ArrowRight" && !e.target.closest(".days")) setStart(S.start + S.range);
+  if (!S.data || S.tab === "overview" || /input|textarea/i.test(e.target.tagName) || document.querySelector(".modal:not([hidden])")) return;
+  if (e.key === "ArrowLeft" && !e.target.closest(".days,.tabs")) setStart(S.start - S.range);
+  if (e.key === "ArrowRight" && !e.target.closest(".days,.tabs")) setStart(S.start + S.range);
 });
-let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if (!S.data) return; renderMain(); }, 120); });
+let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if (S.data) renderMain(); }, 120); });
 
 // ---------- Search ----------
 function parseCoords(s) {
@@ -549,7 +888,7 @@ function showSugg(items, emptyMsg, header) {
   const ul = $("sugg");
   ul.innerHTML = (header ? `<li class="shd">${esc(header)}</li>` : "") + (items.length ? items.map((p, i) => `<li role="option" data-i="${i}" class="${i === suggAct ? "act" : ""}">
       <div><b>${esc(p.name)}</b><br><small>${esc([p.admin1, p.country].filter(Boolean).join(", ") || "Coordinates")}</small></div>
-      <span class="cc">${p.lat.toFixed(2)}, ${p.lon.toFixed(2)}</span></li>`).join("")
+      <span class="cc">${(+p.lat).toFixed(2)}, ${(+p.lon).toFixed(2)}</span></li>`).join("")
     : `<li class="empty">${esc(emptyMsg || "No places found")}</li>`);
   ul.hidden = false;
 }
@@ -570,7 +909,7 @@ $("q").addEventListener("input", () => {
   const v = $("q").value.trim();
   if (!v) return showRecent();
   const c = parseCoords(v);
-  if (c) return showSugg([{ name: coordName(c.lat, c.lon), lat: c.lat, lon: c.lon, coords: true }]);
+  if (c) return showSugg([{ name: coordName(c.lat, c.lon), lat: c.lat, lon: c.lon }]);
   if (v.length < 2) return hideSugg();
   sTimer = setTimeout(async () => {
     const seq = ++sSeq;
@@ -592,12 +931,12 @@ $("q").addEventListener("keydown", e => {
 $("searchForm").addEventListener("submit", e => {
   e.preventDefault();
   const c = parseCoords($("q").value);
-  if (c) return pick({ name: coordName(c.lat, c.lon), lat: c.lat, lon: c.lon, coords: true });
-  if (suggItems.length) pick(suggItems[Math.max(0, suggAct)]);
+  if (c) return choose({ name: coordName(c.lat, c.lon), lat: c.lat, lon: c.lon });
+  if (suggItems.length) choose(suggItems[Math.max(0, suggAct)]);
 });
-$("sugg").addEventListener("pointerdown", e => { const li = e.target.closest("li[data-i]"); if (li) { e.preventDefault(); pick(suggItems[+li.dataset.i]); } });
+$("sugg").addEventListener("pointerdown", e => { const li = e.target.closest("li[data-i]"); if (li) { e.preventDefault(); choose(suggItems[+li.dataset.i]); } });
 document.addEventListener("pointerdown", e => { if (!e.target.closest(".search")) hideSugg(); });
-function pick(p) { hideSugg(); $("q").value = ""; $("q").blur(); loadLocation(p); }
+function choose(p) { hideSugg(); $("q").value = ""; $("q").blur(); loadLocation(p); }
 $("locate").onclick = () => {
   if (!navigator.geolocation) return status("Location isn't available in this browser. Search a place or type coordinates instead.", true);
   status("Finding your location…");
@@ -614,19 +953,22 @@ function status(msg, err) {
   st.innerHTML = err ? esc(msg) : `<div class="spinner"></div>${esc(msg)}`;
   st.hidden = false;
 }
-async function loadLocation(p, keepView) {
+async function loadLocation(p, keepView, tab) {
   S.loc = { name: p.name, admin1: p.admin1 || "", country: p.country || "", lat: +p.lat, lon: +p.lon };
   LS.set("loc", S.loc); addRecent(S.loc);
-  try { const u = new URL(location.href); u.search = `?lat=${S.loc.lat.toFixed(4)}&lon=${S.loc.lon.toFixed(4)}&name=${encodeURIComponent(S.loc.name)}`; history.replaceState(null, "", u); } catch {}
+  if (!keepView) S.tab = TABS.includes(tab) ? tab : "overview";
+  try { const u = new URL(location.href); u.search = `?lat=${S.loc.lat.toFixed(4)}&lon=${S.loc.lon.toFixed(4)}&name=${encodeURIComponent(S.loc.name)}`; u.hash = S.tab; history.replaceState(null, "", u); } catch {}
   document.title = `${S.loc.name} · Weather Overlay`;
   if (!keepView) { $("hero").hidden = true; $("view").hidden = true; status(`Loading every model for ${S.loc.name}…`); }
   try {
-    S.data = await fetchForecast(S.loc.lat, S.loc.lon);
+    const D = await fetchForecast(S.loc.lat, S.loc.lon);
+    S.data = D;
     if (!keepView) { S.start = todayIdx(); S.sel = ""; }
-    S.start = Math.max(0, Math.min(S.data.dates.length - S.range, S.start));
+    S.start = Math.max(0, Math.min(D.dates.length - S.range, S.start));
     S.min = null;
     $("status").hidden = true; $("view").hidden = false;
     renderAll();
+    window.scrollTo({ top: 0 });
   } catch (err) {
     status(`Couldn't load forecasts: ${err.message}`, true);
     if (!S.data) $("hero").hidden = false;
@@ -639,9 +981,8 @@ $("home").onclick = e => {
   document.title = "Weather Overlay";
 };
 
-// Keep the clock and "now" line fresh; refetch if the data is stale
 setInterval(tickClock, 15000);
-setInterval(() => { if (S.data && !document.hidden) renderMain(); }, 5 * 60000);
+setInterval(() => { if (S.data && !document.hidden) S.tab === "overview" ? renderOverview() : renderMain(); }, 5 * 60000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && S.data && Date.now() - S.data.fetched > 30 * 60000) loadLocation(S.loc, true);
 });
@@ -651,8 +992,8 @@ renderQuick();
 (function boot() {
   const qp = new URLSearchParams(location.search);
   const lat = parseFloat(qp.get("lat")), lon = parseFloat(qp.get("lon"));
-  if (isFinite(lat) && isFinite(lon)) return loadLocation({ name: qp.get("name") || coordName(lat, lon), lat, lon, ...(LS.get("loc", {})?.lat === lat ? LS.get("loc", {}) : {}) });
   const last = LS.get("loc", null);
+  if (isFinite(lat) && isFinite(lon)) return loadLocation({ name: qp.get("name") || coordName(lat, lon), lat, lon, ...(last && Math.abs(last.lat - lat) < 1e-3 ? last : {}) }, false, location.hash.slice(1));
   if (last && isFinite(last.lat)) loadLocation(last);
 })();
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});

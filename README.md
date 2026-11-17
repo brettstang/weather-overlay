@@ -1,6 +1,12 @@
 # Weather Overlay
 
-Every forecast model on one chart. Search any city or type coordinates (`35.47, -97.52` or `35.47N 97.52W`) and see hourly 2 m temperature from every Open-Meteo model overlaid — the same overlay system as Weather Scanner.
+Every forecast model on one chart. Search any city or type coordinates (`35.47, -97.52` or `35.47N 97.52W`).
+
+**Overview** — right-now model averages, today/tomorrow cards, 16-day outlook with model-spread bars and agreement dots, next-24 h precipitation timing, thunderstorm potential.
+
+**Tabs** (each with the overlay chart, readout and daily table): Temperature · Feels like · Dew point · Cloud · Precipitation (total / hourly / snow, with a rain-snow-mix type strip) · Wind (sustained / gusts, with direction) · CAPE · Helicity.
+
+Helicity: Open-Meteo doesn't publish model helicity, so the app estimates 0–3 km storm-relative helicity (Bunkers right-mover) from each model's pressure-level winds, next 8 days.
 
 ## What's in it
 - **45 models** (`models.js`): ECMWF IFS / HRES / AIFS, GFS, HRRR, NBM, NAM, GraphCast, GEM / HRDPS, ICON / ICON-EU / ICON-D2, UKMO, Météo-France ARPEGE / AROME, JMA, KMA, CMA, BOM, MET Norway, KNMI, DMI, ItaliaMeteo, MeteoSwiss. Regional models appear only where they have coverage. If Open-Meteo rejects a model id, the app drops it and retries automatically.

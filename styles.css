@@ -368,3 +368,93 @@ body.fs-open { overflow: hidden; }
 .sheet .optrow .sw { margin: 0; }
 .chead .gexp { margin-left: 0; }
 .side .readout { background: none; border: 0; padding: 0; }
+
+/* =========================================================
+   v3: tabs, overview, parameter extras
+   ========================================================= */
+.tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; margin: 0 -2px 14px; padding: 0 2px; border-bottom: 1px solid var(--stroke); }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: none; padding: 10px 14px 11px; color: var(--muted); text-decoration: none; font-weight: 600; font-size: 14.5px; border-bottom: 2.5px solid transparent; margin-bottom: -1px; white-space: nowrap; transition: color .12s; }
+.tab:hover { color: var(--text); }
+.tab.on { color: #fff; border-bottom-color: #7c93ff; }
+.modes { display: inline-flex; margin: -2px 0 12px; }
+.modes[hidden] { display: none; }
+.seg.full { display: flex; margin-top: 8px; }
+.seg.full button { flex: 1; }
+.day .hl .p { color: #dfe4ff; font-weight: 600; }
+.day .hl small { color: var(--faint); margin-left: 2px; font-size: 10.5px; }
+.rrow .pt, .ptkey .pt { flex: none; width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.rrow .wd { flex: none; font-style: normal; font-size: 12px; color: var(--muted); display: inline-block; line-height: 1; }
+.ptkey { display: flex; gap: 14px; justify-content: center; font-size: 12px; color: var(--muted); margin-top: 10px; }
+.ptkey span { display: flex; align-items: center; gap: 5px; }
+.srhnote { font-size: 12px; color: var(--faint); margin: 10px 4px 0; line-height: 1.45; }
+.linkbtn { border: 0; background: none; color: #a9b8ff; cursor: pointer; padding: 0; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+
+/* Overview */
+.overview[hidden] { display: none; }
+.ovgrid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; }
+.ovnow { padding: 18px 20px; }
+.ovnh { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-weight: 700; font-size: 15px; }
+.ovnh small { color: var(--faint); font-weight: 500; font-size: 12px; }
+.ovbig { font-size: 64px; font-weight: 800; letter-spacing: -2px; line-height: 1.05; margin-top: 8px; }
+.ovbig span { font-size: 26px; font-weight: 600; color: var(--muted); letter-spacing: 0; margin-left: 2px; vertical-align: 26px; }
+.ovsub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.ovms { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 16px; }
+.ovm { background: rgba(255,255,255,.05); border-radius: 12px; padding: 10px 12px; min-width: 0; }
+.ovm span { display: block; font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+.ovm b { display: block; font-size: 20px; font-weight: 700; margin-top: 2px; white-space: nowrap; }
+.ovm b small { font-size: 12px; color: var(--muted); font-weight: 500; }
+.ovm > small { display: block; font-size: 11.5px; color: var(--faint); }
+.ovp { margin-top: 14px; font-size: 14px; color: #dfe4ff; line-height: 1.5; }
+.ovdays { display: grid; gap: 16px; }
+.ovday { text-align: left; cursor: pointer; padding: 16px 18px; transition: border-color .12s, background .12s; }
+.ovday:hover { border-color: var(--stroke-2); background: rgba(255,255,255,.06); }
+.ovdh { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 15px; }
+.ic { display: inline-grid; place-items: center; }
+.ic svg { width: 30px; height: 30px; }
+.ovhl { display: flex; gap: 12px; align-items: baseline; margin-top: 2px; }
+.ovhl .h { font-size: 34px; font-weight: 800; letter-spacing: -1px; }
+.ovhl .l { font-size: 22px; font-weight: 600; color: #8fd3ff; }
+.ovstats { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.ovstats b { color: var(--text); }
+.ovstats small { color: var(--faint); }
+.ag.good { color: var(--green) !important; } .ag.mid { color: #ffd166 !important; } .ag.bad { color: #ff7a7e !important; }
+.ovout { margin-top: 16px; padding: 14px 0 6px; }
+.ovrows { padding: 0 8px; }
+.ovrow { display: grid; grid-template-columns: 64px 36px 74px 40px 1fr 40px 14px; align-items: center; gap: 10px; width: 100%; border: 0; background: none; padding: 9px 8px;
+  border-top: 1px solid rgba(255,255,255,.05); cursor: pointer; text-align: left; font-variant-numeric: tabular-nums; border-radius: 10px; }
+.ovrow:first-child { border-top: 0; }
+.ovrow:hover { background: rgba(255,255,255,.05); }
+.ovrow .od b { display: block; font-size: 14px; } .ovrow .od small { color: var(--faint); font-size: 11.5px; }
+.ovrow .ic svg { width: 28px; height: 28px; }
+.ovrow .op { font-size: 13px; color: #8fd3ff; font-weight: 600; line-height: 1.2; }
+.ovrow .op small { color: var(--faint); font-weight: 500; margin-left: 2px; font-size: 11px; }
+.ovrow .op em { display: block; font-style: normal; color: var(--faint); font-size: 11px; font-weight: 500; }
+.ovrow .ol { color: #8fd3ff; text-align: right; font-weight: 600; }
+.ovrow .oh { font-weight: 700; }
+.obar { position: relative; height: 8px; border-radius: 999px; background: rgba(255,255,255,.06); }
+.obar i { position: absolute; top: 0; bottom: 0; border-radius: 999px; }
+.obar .rng { background: rgba(160,175,255,.22); }
+.obar .avg { background: linear-gradient(90deg, #5ec8ff, #ffd166 60%, #ff9f43); top: 1px; bottom: 1px; }
+.oa { width: 9px; height: 9px; border-radius: 50%; justify-self: center; }
+.oa.good { background: var(--green); } .oa.mid { background: #ffd166; } .oa.bad { background: #ff7a7e; }
+.ovstorm { margin-top: 16px; padding: 16px 18px; }
+.ovstorm .ovp { margin-top: 8px; }
+.ovlinks { display: flex; gap: 18px; margin-top: 10px; font-size: 13.5px; font-weight: 600; }
+.ovlinks a { text-decoration: none; }
+.ovfoot { text-align: center; color: var(--faint); font-size: 12.5px; margin-top: 14px; }
+
+@media (max-width: 1000px) { .ovgrid { grid-template-columns: 1fr; } .ovdays { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 680px) {
+  .tab { padding: 9px 11px 10px; font-size: 14px; }
+  .ovdays { grid-template-columns: 1fr; gap: 12px; }
+  .ovgrid { gap: 12px; }
+  .ovnow { padding: 16px; }
+  .ovbig { font-size: 56px; }
+  .ovms { grid-template-columns: 1fr 1fr; }
+  .ovrow { grid-template-columns: 50px 28px 56px 30px 1fr 30px 10px; gap: 7px; padding: 9px 4px; }
+  .ovrow .ic svg { width: 24px; height: 24px; }
+  .ovrows { padding: 0 4px; }
+  .ovout .thead .tsub { display: none; }
+  .ovout, .ovstorm { margin-top: 12px; }
+}
