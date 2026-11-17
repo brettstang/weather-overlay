@@ -67,7 +67,7 @@ const fcURL = (lat, lon, ids) =>
   `${API}?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&hourly=temperature_2m&models=${ids.join(",")}&timezone=auto&past_days=${PAST_DAYS}&forecast_days=${FORECAST_DAYS}`;
 
 async function fetchForecast(lat, lon) {
-  let ids = ["best_match", ...MODELS.map(m => m.id)];
+  let ids = MODELS.map(m => m.id);
   // One request for every model. If Open-Meteo doesn't know a model id, drop it and retry.
   for (let i = 0; i < 10; i++) {
     try { return parse(await getJSON(fcURL(lat, lon, ids)), ids); }
@@ -225,7 +225,7 @@ function chartSVG(W, H, compact) {
     `<path data-line="${s.id}" d="${path(s.pts)}" fill="none" stroke="${colorOf(s.id)}" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round" opacity=".92"/>`).join("");
   const bl = series.find(s => s.id === "blend");
   const blend = bl ? `<path data-line="blend" d="${path(bl.pts)}" fill="none" stroke="rgba(255,255,255,.7)" stroke-width="1.8" stroke-dasharray="5 4"/>` : "";
-  // Day's extremes (single day): Blend, else the models' mean
+  // Day's extremes (single day): mean of the shown models
   let ext = "";
   if (!multi) {
     const e = dayExt(S.start);
@@ -258,16 +258,15 @@ function dayExt(i) {
 function summaryHTML() {
   const D = S.data, U = `°${S.unit}`;
   if (S.range === 1) {
-    const i = S.start, d = D.dates[i], e = dayExt(i), src = S.shown.has("blend") && D.daily.blend?.[i] ? "Blend" : "Model mean";
+    const i = S.start, d = D.dates[i], e = dayExt(i), src = "Model mean";
     const highs = modelIds(visible()).map(id => D.daily[id][i]).filter(Boolean);
     const span = highs.length > 1 ? ` · models <span class="hi">${fmt(cv(Math.min(...highs.map(h => h.hi))))}–${fmt(cv(Math.max(...highs.map(h => h.hi))))}°</span> / <span class="lo">${fmt(cv(Math.min(...highs.map(h => h.lo))))}–${fmt(cv(Math.max(...highs.map(h => h.lo))))}°</span>` : "";
     const tag = i === todayIdx() ? "Today" : i === todayIdx() + 1 ? "Tomorrow" : i < todayIdx() ? "Past" : "";
     return `<b>${dayLong(d)}</b>${tag ? ` · ${tag}` : ""}${e ? ` · ${src} high <b class="hi">${fmt(cv(e.hi))}${U}</b> at ${hhmm(e.hiM - i * 1440)}, low <b class="lo">${fmt(cv(e.lo))}${U}</b> at ${hhmm(e.loM - i * 1440)}` : ""}${span}`;
   }
   const a = D.dates[S.start], b = D.dates[S.start + S.range - 1];
-  const ser = windowSeries().filter(s => s.id === "blend")[0] || null;
-  const v = ser ? ser.pts.map(p => p.v) : [];
-  return `<b>${dayShort(a)} – ${dayShort(b)}</b> · ${S.range} days${v.length ? ` · Blend range <b class="lo">${fmt(Math.min(...v))}°</b> to <b class="hi">${fmt(Math.max(...v))}${U}</b>` : ""}`;
+  const v = windowSeries().flatMap(s => s.pts.map(p => p.v));
+  return `<b>${dayShort(a)} – ${dayShort(b)}</b> · ${S.range} days${v.length ? ` · models range <b class="lo">${fmt(Math.min(...v))}°</b> to <b class="hi">${fmt(Math.max(...v))}${U}</b>` : ""}`;
 }
 
 // ---------- Readout (crosshair) ----------
@@ -344,7 +343,7 @@ function legendTitle() {
 function renderDays() {
   const D = S.data, t = todayIdx();
   $("days").innerHTML = D.dates.map((d, i) => {
-    const e = D.daily.blend?.[i] || null, inR = i >= S.start && i < S.start + S.range;
+    const e = dayExt(i), inR = i >= S.start && i < S.start + S.range;
     const tag = i === t ? "<em>Today</em>" : "";
     return `<button class="day${i < t ? " past" : ""}${inR ? " in" : ""}${i === S.start && S.range > 1 ? " first" : ""}" data-i="${i}" role="tab" aria-selected="${inR}">
       <div class="dn"><span>${WD[dObj(d).getUTCDay()]}</span>${tag}</div><div class="dt">${MO[dObj(d).getUTCMonth()]} ${dObj(d).getUTCDate()}</div>

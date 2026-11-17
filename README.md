@@ -4,7 +4,7 @@ Every forecast model on one chart. Search any city or type coordinates (`35.47, 
 
 ## What's in it
 - **45 models** (`models.js`): ECMWF IFS / HRES / AIFS, GFS, HRRR, NBM, NAM, GraphCast, GEM / HRDPS, ICON / ICON-EU / ICON-D2, UKMO, Météo-France ARPEGE / AROME, JMA, KMA, CMA, BOM, MET Norway, KNMI, DMI, ItaliaMeteo, MeteoSwiss. Regional models appear only where they have coverage. If Open-Meteo rejects a model id, the app drops it and retries automatically.
-- **Blend** (dashed white) = Open-Meteo best match.
+- Circles mark the day's high and low of the shown models' average.
 - **Spread band** = min–max of the models shown.
 - Tap/drag the chart for every model's value at that hour, plus mean and spread.
 - Tap a model to highlight it; tap its dot to hide/show it. Presets: Core 7 (Weather Scanner's set), Global, High-res, All.
