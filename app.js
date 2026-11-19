@@ -48,6 +48,7 @@ const S = {
   shown: new Set(LS.get("shown", CORE_MODELS)), preset: LS.get("preset", "core"),
   spread: LS.get("spread", true), lines: LS.get("lines", { low: null, high: null, unit: "C" }),
   mode: LS.get("mode", { precip: "acc", wind: "speed" }),
+  outlook: LS.get("outlook", 10),
   sel: "", min: null
 };
 S.shown.delete("blend");
@@ -658,7 +659,7 @@ function renderOverview() {
   };
   // Outlook
   const rows = [];
-  for (let i = t; i < D.dates.length; i++) { const st = dayStats(i, ids); if (st) rows.push([i, st]); }
+  for (let i = t; i < Math.min(D.dates.length, t + S.outlook); i++) { const st = dayStats(i, ids); if (st) rows.push([i, st]); }
   const gMin = Math.min(...rows.map(([, s]) => s.loMin)), gMax = Math.max(...rows.map(([, s]) => s.hiMax)), pct = v => ((v - gMin) / (gMax - gMin || 1) * 100).toFixed(1);
   const outlook = rows.map(([i, s]) => {
     const [ag, cls] = agreeOf(s.hiMax - s.hiMin), d = D.dates[i];
@@ -695,7 +696,8 @@ function renderOverview() {
       <div class="ovdays">${dayCard(today, t, "Today")}${dayCard(tmr, t + 1, "Tomorrow")}</div>
     </div>
     <div class="card ovout">
-      <div class="thead"><h3>${rows.length}-day outlook</h3><span class="tsub">Bar = avg low→high · faint = all models · dot = agreement</span></div>
+      <div class="thead"><h3>${rows.length}-day outlook</h3><div class="seg sm2" id="outlookLen"><button data-ol="10" class="${S.outlook === 10 ? "on" : ""}">10 days</button><button data-ol="16" class="${S.outlook === 16 ? "on" : ""}">16 days</button></div></div>
+      <div class="tsub ovkey">Bar = avg low→high · faint = all models · dot = agreement</div>
       <div class="ovrows">${outlook}</div>
     </div>
     <div class="card ovstorm"><div class="ovnh"><span>Thunderstorm potential</span><small>next 3 days</small></div><div class="ovp">${capeTxt}</div>
@@ -814,10 +816,11 @@ document.addEventListener("click", e => {
   const go = t.closest("[data-goto]");
   if (go) { S.range = 1; LS.set("range", 1); S.start = +go.dataset.goto; location.hash = "temp"; return setTab("temp"); }
   const day = t.closest(".day, .dt thead th[data-i]"); if (day) return setStart(+day.dataset.i);
+  const ol = t.closest("[data-ol]"); if (ol) { S.outlook = +ol.dataset.ol; LS.set("outlook", S.outlook); return renderOverview(); }
   const md = t.closest("#modes button");
   if (md) { S.mode[paramKey()] = md.dataset.mode; LS.set("mode", S.mode); S.sel = ""; return renderAll(); }
   const rb = t.closest("#range button");
-  if (rb) { S.range = +rb.dataset.r; LS.set("range", S.range); if (S.range === 16 && S.start < todayIdx()) S.start = todayIdx(); return setStart(S.start); }
+  if (rb) { S.range = +rb.dataset.r; LS.set("range", S.range); if (S.range >= 10 && S.start < todayIdx()) S.start = todayIdx(); return setStart(S.start); }
   const ub = t.closest(".unit button");
   if (ub) { S.unit = ub.dataset.unit; LS.set("unit", S.unit); syncUnitOpts(); return renderAll(); }
   const uo = t.closest("[data-wu],[data-pu]");

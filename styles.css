@@ -458,3 +458,9 @@ body.fs-open { overflow: hidden; }
   .ovout .thead .tsub { display: none; }
   .ovout, .ovstorm { margin-top: 12px; }
 }
+.seg.sm2 button { padding: 5px 10px; font-size: 12.5px; }
+.ovkey { padding: 0 16px 6px; }
+@media (max-width: 680px) { .seg button { padding: 7px 9px; } .ovout .thead .tsub { display: block; } }
+@media (max-width: 380px) { .seg button { padding: 7px 7px; } }
+@media (max-width: 680px) { .toolbar .mdots { display: none; } .tb-right { gap: 6px; } .toolbar .btn { padding: 0 10px; gap: 6px; } .toolbar .btn.icon { padding: 0; } .toolbar { gap: 6px; } }
+@media (max-width: 360px) { .toolbar .btn:not(.icon) { font-size: 13px; } }
