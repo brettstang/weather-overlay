@@ -2,7 +2,7 @@
 
 Every forecast model on one chart. Search any city or type coordinates (`35.47, -97.52` or `35.47N 97.52W`).
 
-**Overview** — right-now model averages, today/tomorrow cards, 16-day outlook with model-spread bars and agreement dots, next-24 h precipitation timing, thunderstorm potential.
+**Overview** — a stacked meteogram (like SpotWx) on one shared time axis: Temperature & humidity (temp, dew point, feels like, RH, observed), Precipitation & cloud (hourly bars coloured by rain/snow/mix, running totals, cloud cover), Wind & pressure (wind, gusts, direction arrows, sea-level pressure, observed), CAPE & helicity. Source = average of your models (shaded range) or any single model; 2–10 days; drag any chart to read every panel at that hour.
 
 **Tabs** (each with the overlay chart, readout and daily table): Temperature · Feels like · Dew point · Cloud · Precipitation (total / hourly / snow, with a rain-snow-mix type strip) · Wind (sustained / gusts, with direction) · CAPE · Helicity.
 

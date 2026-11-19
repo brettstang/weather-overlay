@@ -553,3 +553,37 @@ body[data-tab="custom"] .tablecard, body[data-tab="custom"] #modelsBtn { display
 .mchip.off { cursor: default; color: var(--faint); border-style: dashed; }
 .crow.cobs { background: rgba(255,255,255,.1); }
 .crow.cobs span { font-weight: 700; color: #fff; }
+
+/* =========================================================
+   v6: meteogram overview
+   ========================================================= */
+.ovbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 12px; }
+.ovsel { display: flex; align-items: center; gap: 8px; background: var(--card-2); border: 1px solid var(--stroke); border-radius: 11px; padding: 0 4px 0 12px; height: 38px; }
+.ovsel span { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+.ovsel select { background: transparent; border: 0; color: var(--text); font: 600 14px var(--font); outline: 0; max-width: 230px; padding: 6px 4px; cursor: pointer; }
+.ovsel select option { background: #161b3d; }
+.ovbar .chip { height: 38px; } .ovbar .chip.on { color: #fff; border-color: rgba(255,255,255,.5); }
+.ovbar .chip .ld { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.ovpanel { padding: 12px 10px 10px; margin-bottom: 12px; }
+.ovph { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 0 6px 4px; }
+.ovph h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.ovv { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.ovv b { color: var(--text); } .ovv .ovw { color: var(--faint); margin-right: 4px; }
+.ovv .c-t { color: #ff8a8a; } .ovv .c-d { color: #3ee6a0; } .ovv .c-f { color: #ffb36b; } .ovv .c-p { color: #4cc9f0; } .ovv .c-w { color: #3ee6a0; } .ovv .c-g { color: #9ef7c9; } .ovv .c-c { color: #ffd166; } .ovv .c-h { color: #8db8ff; }
+.ovc svg { display: block; width: 100%; height: auto; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+.ovleg { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; font-size: 11.5px; color: var(--muted); padding: 4px 6px 0; }
+.lg-i { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.lg-i .ll { width: 16px; height: 3px; border-radius: 2px; }
+.lg-i .ll.dash { background: repeating-linear-gradient(90deg, currentColor 0 5px, transparent 5px 8px) !important; }
+.lg-i .la { width: 12px; height: 10px; border-radius: 2px; opacity: .7; }
+.lg-i .lb { width: 6px; height: 11px; border-radius: 1px; }
+.lg-i .lr { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid; }
+.lg-i .ld { width: 7px; height: 7px; border-radius: 50%; }
+.lg-n { color: var(--faint); }
+.overview .ovfoot { margin-top: 4px; }
+@media (max-width: 680px) {
+  .ovpanel { padding: 10px 4px 8px; border-radius: 14px; }
+  .ovph { flex-direction: column; gap: 2px; align-items: flex-start; }
+  .ovv { text-align: left; font-size: 12px; }
+  .ovsel { flex: 1 1 100%; } .ovsel select { max-width: none; flex: 1; }
+}
