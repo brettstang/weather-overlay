@@ -49,7 +49,7 @@ const S = {
   spread: LS.get("spread", true), lines: LS.get("lines", { low: null, high: null, unit: "C" }),
   mode: LS.get("mode2", { precip: LS.get("mode", {}).precip || "acc", wind: "both" }),
   outlook: LS.get("outlook", 10), lead: LS.get("lead", 1),
-  cparams: LS.get("cparams", ["temp", "dew", "wind", "gust"]), cmodels: LS.get("cmodels", ["ecmwf_ifs025", "gfs_seamless", "gem_seamless"]), cavg: LS.get("cavg", false),
+  cparams: LS.get("cparams", ["temp", "dew", "wind", "gust"]), cmodels: LS.get("cmodels", ["ecmwf_ifs025", "gfs_seamless", "gem_seamless"]), cavg: LS.get("cavg", false), cobs: LS.get("cobs", true),
   sel: "", min: null
 };
 S.shown.delete("blend");
@@ -173,7 +173,7 @@ async function loadVerification(D) {
   const [o, L] = await Promise.all([obsP, leadP]);
   if (S.data !== D) return;
   if (o && o.station && o.obs?.length) {
-    const pts = o.obs.map(([t, c, d]) => ({ m: (t + D.offset * 1000 - D.base) / 60000, c, d })).filter(p => p.m >= 0);
+    const pts = o.obs.map(([t, c, d, w, g, cl, pr]) => ({ m: (t + D.offset * 1000 - D.base) / 60000, c, d, w: w ?? null, g: g ?? null, cl: cl ?? null, pr: pr ?? null, f: apparentT(c, d, w) })).filter(p => p.m >= 0);
     D.obs = { station: o.station, pts };
   } else D.obs = { station: o?.station || null, pts: [] };
   if (L) {
@@ -191,6 +191,12 @@ async function loadVerification(D) {
   }
   D.verified = true; D.memo.clear();
   renderAll();
+}
+// Apparent ("feels like") temperature from temp, dew point and wind — Steadman's formula, as used for model feels-like
+function apparentT(c, d, w) {
+  if (c == null || d == null || w == null) return null;
+  const e = 6.105 * Math.exp(17.27 * d / (237.7 + d));
+  return Math.round((c + 0.33 * e - 0.70 * (w / 3.6) - 4.0) * 10) / 10;
 }
 // Observed daily high/low (raw °C) for a past day; needs most of the day's hours
 function obsDay(v, i) {
@@ -869,6 +875,13 @@ const CGROUP = { temp: "temp", pct: "cloud", precip: "precip", wind: "wind", cap
 const DASHES = ["", "7 4", "2 3.5", "11 3 2 3", "1 5", "16 5"];
 const DASH_NAME = ["solid", "dashed", "dotted", "dash-dot", "sparse dots", "long dash"];
 const MAX_CP = 5, MAX_CM = 6;
+const OBS_FIELD = { temp: "c", dew: "d", feels: "f", wind: "w", gust: "g", cloud: "cl", precip: "pr" };
+const obsOn = () => S.cobs && S.data?.obs?.pts.length;
+function obsSeriesFor(p) {
+  const f = OBS_FIELD[p], D = S.data; if (!f || !obsOn()) return [];
+  const ws = S.start * 1440, c = cConv(CP[p].g);
+  return D.obs.pts.filter(q => q.m >= ws && q.m <= ws + S.range * 1440 && q[f] != null).map(q => ({ m: q.m - ws, v: c(q[f]) }));
+}
 const cpk = g => CGROUP[g];
 const cConv = g => conv(cpk(g), g === "precip" ? "hr" : undefined);
 const cFmt = (g, v) => fv(cpk(g), v, g === "precip" ? "hr" : undefined);
@@ -884,8 +897,9 @@ function customSeries() {
     const c = cConv(P.g), per = [];
     for (const id of ids) {
       const a = D.raw[P.v]?.[id]; if (!a) continue;
+      const pa = OBS_VARS[P.v] && S.lead > 0 ? D.raw[`${P.v}@${S.lead}`]?.[id] : null, t0 = todayIdx() * 1440;
       const pts = [];
-      for (let k = 0; k < a.length; k++) { const m = D.mins[k]; if (m >= ws && m <= we && a[k] != null) pts.push({ m: m - ws, v: c(a[k]), k }); }
+      for (let k = 0; k < a.length; k++) { const m = D.mins[k]; const x = pa && m < t0 && pa[k] != null ? pa[k] : a[k]; if (m >= ws && m <= we && x != null) pts.push({ m: m - ws, v: c(x), k }); }
       if (pts.length) per.push({ key: `${p}|${id}`, p, id, pts });
     }
     if (!per.length) continue;
@@ -912,6 +926,7 @@ function niceRange(g, vals, H) {
 function customSVG(W, H) {
   const D = S.data, series = customSeries(), span = S.range * 1440, multi = S.range > 1;
   if (!series.length) return { svg: "", G: null };
+  const obsS = {}; for (const p of S.cparams) { const o = obsSeriesFor(p); if (o.length && series.some(s => s.p === p)) obsS[p] = o; }
   const groups = [...new Set(series.map(s => CP[s.p].g))];
   const panels = []; for (let i = 0; i < groups.length; i += 2) panels.push(groups.slice(i, i + 2));
   const hasRight = panels.some(p => p.length > 1);
@@ -923,6 +938,7 @@ function customSVG(W, H) {
     const top = T + pi * (ph + gap), bot = top + ph;
     for (const g of pg) {
       const vals = series.filter(s => CP[s.p].g === g).flatMap(s => s.pts.flatMap(q => q.hi != null ? [q.lo, q.hi] : [q.v]));
+      for (const [p, o] of Object.entries(obsS)) if (CP[p].g === g) for (const q of o) vals.push(q.v);
       const r = niceRange(g, vals, ph);
       scale[g] = { ...r, top, bot, y: v => top + (1 - (v - r.lo) / (r.hi - r.lo)) * (bot - top) };
     }
@@ -965,9 +981,16 @@ function customSVG(W, H) {
       lines += `<g data-line="${s.key}" fill="${col}" stroke="${col}" stroke-width="0" opacity=".95">${s.pts.map(q => dotShape(shape, x(q.m), sc.y(q.v), dotR + (shape > 0 ? .4 : 0))).join("")}</g>`;
     } else lines += `<path data-line="${s.key}" d="${path(s.pts, sc.y)}" fill="none" stroke="${col}" stroke-width="1.9" stroke-dasharray="${s.id === "avg" ? "" : dashOf(s.id)}" stroke-linejoin="round" opacity=".95"/>`;
   }
-  const G = { W, H, L, R, T: pTop, pb: pBot, x, span, multi, custom: true, series, scale };
+  // Observed: thick line in the parameter's colour with white report markers (gusts: white-ringed dots)
+  let obsSvg = "";
+  for (const [p, o] of Object.entries(obsS)) {
+    const P = CP[p], sc = scale[P.g], few = o.length < 170;
+    if (P.dots) obsSvg += `<g data-line="${p}|obs">${o.map(q => `<circle cx="${x(q.m).toFixed(1)}" cy="${sc.y(q.v).toFixed(1)}" r="${dotR + 1.6}" fill="${P.color}" stroke="#fff" stroke-width="1.4"/>`).join("")}</g>`;
+    else obsSvg += `<g data-line="${p}|obs"><path d="${path(o, sc.y)}" fill="none" stroke="#0a0e22" stroke-width="5.6" stroke-linejoin="round" opacity=".7"/><path d="${path(o, sc.y)}" fill="none" stroke="${P.color}" stroke-width="3.4" stroke-linejoin="round"/>${few ? o.map(q => `<circle cx="${x(q.m).toFixed(1)}" cy="${sc.y(q.v).toFixed(1)}" r="2.1" fill="#fff"/>`).join("") : ""}</g>`;
+  }
+  const G = { W, H, L, R, T: pTop, pb: pBot, x, span, multi, custom: true, series, scale, obsS };
   const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Custom overlay" style="touch-action:none">
-    ${grid}${frame}${xl}${nowSvg}${bands}${lines}<g class="xh"></g>
+    ${grid}${frame}${xl}${nowSvg}${bands}${lines}${obsSvg}<g class="xh"></g>
     <rect class="hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/></svg>`;
   return { svg, G };
 }
@@ -983,6 +1006,10 @@ function dotShape(i, cx, cy, r) {
     default: return `<circle cx="${cx}" cy="${cy}" r="${r}"/>`;
   }
 }
+function obsSample(P, color = P.color) {
+  return P.dots ? `<svg class="dsm" viewBox="0 0 26 10" width="26" height="10"><circle cx="13" cy="5" r="3.6" fill="${color}" stroke="#fff" stroke-width="1.4"/></svg>`
+    : `<svg class="dsm" viewBox="0 0 26 10" width="26" height="10"><line x1="1" y1="5" x2="25" y2="5" stroke="${color}" stroke-width="3.4"/><circle cx="7" cy="5" r="2" fill="#fff"/><circle cx="19" cy="5" r="2" fill="#fff"/></svg>`;
+}
 const DOT_NAME = ["circle", "square", "triangle", "diamond", "ring", "cross"];
 function dotSample(i, color) { return `<svg class="dsm" viewBox="0 0 14 10" width="14" height="10"><g fill="${color}" stroke="${color}" stroke-width="0">${dotShape(i, 7, 5, 3)}</g></svg>`; }
 
@@ -993,6 +1020,11 @@ function customReadout(G, minute) {
   for (const p of S.cparams) {
     const P = CP[p], ss = G.series.filter(s => s.p === p); if (!ss.length) continue;
     html += `<div class="cgrp"><div class="cgh"><i style="background:${P.color}"></i><b>${esc(P.label)}</b><small>${esc(cUnit(P.g))}</small></div>`;
+    const ob = G.obsS?.[p];
+    if (ob) {
+      let best = null; for (const q of ob) if (Math.abs(q.m - minute) <= 35 && (!best || Math.abs(q.m - minute) < Math.abs(best.m - minute))) best = q;
+      html += `<div class="crow cobs">${obsSample(P)}<span>Observed <small>${esc(D.obs.station.id)}</small></span><b>${best ? cFmt(P.g, best.v) : "–"}</b></div>`;
+    }
     if (S.cavg) {
       const q = at(ss[0]);
       html += `<div class="crow"><span>Average${q && q.n > 1 ? ` <small>range ${cFmt(P.g, q.lo)}–${cFmt(P.g, q.hi)}</small>` : ""}</span><b>${q ? cFmt(P.g, q.v) : "–"}</b></div>`;
@@ -1011,6 +1043,10 @@ function customCrosshair(scope, G, minute) {
     if (S.sel && s.id !== S.sel && s.id !== "avg") continue;
     const q = s.pts.find(q => q.m === minute); if (!q) continue;
     dots += `<circle cx="${G.x(q.m)}" cy="${G.scale[CP[s.p].g].y(q.v)}" r="3.4" fill="${CP[s.p].color}" stroke="#0a0e22" stroke-width="1.5"/>`;
+  }
+  for (const [p, o] of Object.entries(G.obsS || {})) {
+    let best = null; for (const q of o) if (Math.abs(q.m - minute) <= 35 && (!best || Math.abs(q.m - minute) < Math.abs(best.m - minute))) best = q;
+    if (best) dots += `<circle cx="${G.x(best.m)}" cy="${G.scale[CP[p].g].y(best.v)}" r="4.4" fill="#fff" stroke="${CP[p].color}" stroke-width="2"/>`;
   }
   const xh = scope.querySelector(".xh");
   if (xh) xh.innerHTML = `<line x1="${G.x(minute)}" x2="${G.x(minute)}" y1="${G.T}" y2="${G.pb}" stroke="rgba(255,255,255,.55)"/>${dots}`;
@@ -1040,6 +1076,11 @@ function renderBuilder() {
     const i = sel.indexOf(id), on = i >= 0;
     return `<button class="mchip${on ? " on" : ""}" data-cm="${id}" aria-pressed="${on}">${on ? dashSample(DASHES[i], "#fff", 22) : `<i style="background:${colorOf(id)}"></i>`}${esc(META(id).short)}</button>`;
   }).join("");
+  const st = S.data.obs?.station, hasObs = !!(st && S.data.obs.pts.length);
+  const noObsFor = S.cparams.filter(p => !OBS_FIELD[p]).map(p => CP[p].label);
+  const obsChip = hasObs ? `<button class="mchip obschip${S.cobs ? " on" : ""}" data-cobs aria-pressed="${!!S.cobs}">${obsSample({ dots: false }, "#9fb0ff")}Observed <small>${esc(st.id)}</small></button>`
+    : S.data.verified ? `<span class="mchip off">No airport observations nearby</span>` : `<span class="mchip off">Loading observations…</span>`;
+  const obsKey = hasObs && S.cobs ? `<span class="ki">${obsSample({ dots: false }, "#fff")}${obsSample({ dots: true }, "#888")}<b>Observed ${esc(st.id)}</b>${noObsFor.length ? `<small>(not measured: ${esc(noObsFor.join(", "))})</small>` : ""}</span>` : "";
   const key = S.cavg ? `<span class="kn">Solid line = average of the selected models · shaded = their range</span>`
     : sel.map((id, i) => `<span class="ki">${dashSample(DASHES[i], "#fff", 28)}${dotSample(i, "#fff")}<b>${esc(META(id).short)}</b></span>`).join("");
   $("builder").innerHTML = `
@@ -1047,7 +1088,8 @@ function renderBuilder() {
     <div class="bsec"><div class="bh"><b>Models</b><small>${sel.length}/${MAX_CM} · line pattern = model</small>
       <div class="seg sm2"><button data-cavg="0" class="${S.cavg ? "" : "on"}">Each model</button><button data-cavg="1" class="${S.cavg ? "on" : ""}">Average</button></div></div>
       <div class="bchips">${mChips}${ids.length > 10 ? `<button class="mchip more" data-cmopen>${S.cmOpen ? "Done" : `+ Add models <small>${ids.length - sel.length} more</small>`}</button>` : ""}</div></div>
-    <div class="bkey">${key}</div>`;
+    <div class="bsec"><div class="bh"><b>Actual data</b><small>airport reports (METAR), past ~4 days</small></div><div class="bchips">${obsChip}</div></div>
+    <div class="bkey">${key}${obsKey}</div>`;
 }
 function flash(msg) {
   let el = document.querySelector(".toast"); if (!el) { el = document.createElement("div"); el.className = "toast"; document.body.appendChild(el); }
@@ -1176,6 +1218,7 @@ document.addEventListener("click", e => {
   if (cpb) { const k = cpb.dataset.cp, a = S.cparams; if (a.includes(k)) { if (a.length > 1) a.splice(a.indexOf(k), 1); } else if (a.length < MAX_CP) a.push(k); else return flash(`Up to ${MAX_CP} parameters`); LS.set("cparams", a); return renderAll(); }
   const cmb = t.closest("[data-cm]");
   if (cmb) { const id = cmb.dataset.cm, cur = cModels(); if (cur.includes(id)) { if (cur.length > 1) S.cmodels = cur.filter(x => x !== id); } else if (cur.length < MAX_CM) S.cmodels = [...cur, id]; else return flash(`Up to ${MAX_CM} models, so each gets its own line pattern`); if (S.sel && !S.cmodels.includes(S.sel)) S.sel = ""; LS.set("cmodels", S.cmodels); return renderAll(); }
+  if (t.closest("[data-cobs]")) { S.cobs = !S.cobs; LS.set("cobs", S.cobs); return renderAll(); }
   if (t.closest("[data-cmopen]")) { S.cmOpen = !S.cmOpen; return renderBuilder(); }
   const cav = t.closest("[data-cavg]"); if (cav) { S.cavg = cav.dataset.cavg === "1"; LS.set("cavg", S.cavg); S.sel = ""; return renderAll(); }
   const md = t.closest("#modes button");

@@ -548,3 +548,8 @@ body[data-tab="custom"] .tablecard, body[data-tab="custom"] #modelsBtn { display
 }
 .mchip.more { border-style: dashed; color: #a9b8ff; }
 .mchip.more small { color: var(--faint); font-weight: 500; }
+.mchip.obschip.on { border-color: rgba(255,255,255,.7); background: rgba(255,255,255,.14); }
+.mchip.obschip small, .bkey .ki small { color: var(--faint); font-weight: 500; }
+.mchip.off { cursor: default; color: var(--faint); border-style: dashed; }
+.crow.cobs { background: rgba(255,255,255,.1); }
+.crow.cobs span { font-weight: 700; color: #fff; }
