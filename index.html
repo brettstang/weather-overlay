@@ -98,7 +98,7 @@
       <div class="card tablecard">
         <div class="thead">
           <h3 id="tableTitle">Daily high / low</h3>
-          <span class="tsub">Tap a day to chart it</span>
+          <span class="tsub" id="tableSub">Tap a day to chart it</span>
         </div>
         <div class="tscroll" id="table"></div>
       </div>
@@ -131,6 +131,9 @@
   <div class="sheet" role="dialog" aria-labelledby="optsTitle">
     <div class="shead"><h3 id="optsTitle">Chart options</h3><button class="done" data-close>Done</button></div>
     <label class="optrow"><span><b>Spread band</b><small>Shade the range between the warmest and coldest model</small></span><input type="checkbox" class="sw" id="spreadSw"></label>
+    <div class="optrow col"><span><b>Past days: compare</b><small>Which forecast to score against the airport observations on Temp and Dew point</small></span>
+      <div class="seg full"><button data-lead="1">1 day before</button><button data-lead="2">2 days</button><button data-lead="3">3 days</button><button data-lead="0">Latest run</button></div>
+    </div>
     <div class="optrow col"><span><b>Wind units</b></span>
       <div class="seg full"><button data-wu="kmh">km/h</button><button data-wu="mph">mph</button><button data-wu="kn">knots</button><button data-wu="ms">m/s</button></div>
     </div>

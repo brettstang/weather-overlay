@@ -32,3 +32,11 @@ Run locally: `npx serve .` (or any static server) and open http://localhost:3000
 
 ## Before charging subscriptions
 Open-Meteo's free API is for **non-commercial use**. A paid product needs an Open-Meteo API subscription (then use `customer-api.open-meteo.com` with `&apikey=` in `app.js`), and keep the CC BY 4.0 attribution in the footer. Accounts and payments (e.g. Stripe + Supabase/Clerk) can be added later without changing the chart code.
+
+## Observations & model bias
+`api/obs.js` (Vercel serverless function) finds the nearest METAR airport and returns its ROUTINE reports for the last ~4 days from aviationweather.gov — the same source and parsing (precise T-group temps) as Weather Scanner. On the Temp and Dew point tabs, past days show:
+- the observed line (white) on the chart and an "Observed" row in the table,
+- each model's high/low bias in brackets, e.g. `17.9° (+1.7)`, plus an average-bias column,
+- and the Overview ranks models by average error.
+
+Past-day model values come from Open-Meteo's Previous Runs API (`temperature_2m_previous_day1` etc.), so the bias scores the forecast made 1 day before (changeable to 2, 3 days or latest run in Chart options).
