@@ -38,8 +38,8 @@ const PARAMS = {
   cape:   { label: "CAPE", short: "CAPE", kind: "cape", v: "cape", agg: "max", guides: [[1000, "Moderate"], [2500, "Strong"], [4000, "Extreme"]] },
   srh:    { label: "Helicity", short: "Helicity", kind: "srh", v: "srh", agg: "max", guides: [[150, "Supercell"], [300, "Strong"]], lazy: true },
 };
-const TABS = ["overview", "temp", "feels", "dew", "cloud", "precip", "wind", "cape", "srh"];
-const TAB_LABEL = { overview: "Overview", temp: "Temp", feels: "Feels like", dew: "Dew point", cloud: "Cloud", precip: "Precip", wind: "Wind", cape: "CAPE", srh: "Helicity" };
+const TABS = ["overview", "temp", "feels", "dew", "cloud", "precip", "wind", "cape", "srh", "custom"];
+const TAB_LABEL = { overview: "Overview", temp: "Temp", feels: "Feels like", dew: "Dew point", cloud: "Cloud", precip: "Precip", wind: "Wind", cape: "CAPE", srh: "Helicity", custom: "Custom" };
 
 const S = {
   loc: null, data: null, tab: "overview",
@@ -49,6 +49,7 @@ const S = {
   spread: LS.get("spread", true), lines: LS.get("lines", { low: null, high: null, unit: "C" }),
   mode: LS.get("mode2", { precip: LS.get("mode", {}).precip || "acc", wind: "both" }),
   outlook: LS.get("outlook", 10), lead: LS.get("lead", 1),
+  cparams: LS.get("cparams", ["temp", "dew", "wind", "gust"]), cmodels: LS.get("cmodels", ["ecmwf_ifs025", "gfs_seamless", "gem_seamless"]), cavg: LS.get("cavg", false),
   sel: "", min: null
 };
 S.shown.delete("blend");
@@ -349,6 +350,7 @@ function niceStep(r, n) { const raw = r / n, p = Math.pow(10, Math.floor(Math.lo
 
 // ---------- Chart ----------
 function chartSVG(W, H) {
+  if (S.tab === "custom") return customSVG(W, H);
   const D = S.data, pk = paramKey(), P = PARAMS[pk], series = windowSeries(), span = S.range * 1440, multi = S.range > 1;
   const isPrecip = pk === "precip", L = 42, R = 12, T = 18, B = isPrecip ? 40 : 26;
   let G_obs = null;
@@ -486,6 +488,7 @@ function chartTitle() {
   return `${dayShort(D.dates[S.start])} – ${dayShort(D.dates[S.start + S.range - 1])}${S.start <= t && t < S.start + S.range ? `<span class="tag">incl. today</span>` : ""}`;
 }
 function summaryHTML() {
+  if (S.tab === "custom") return customSummary();
   const D = S.data, pk = paramKey(), P = PARAMS[pk], U = unitOf(pk), v = varOf(pk), ids = visibleFor(v);
   if (!ids.length) return "";
   const i = S.start, days = Array.from({ length: S.range }, (_, k) => i + k);
@@ -582,6 +585,7 @@ function srhNote() {
 }
 function drawCrosshair(scope, minute) {
   const G = scope._G, ro = scope.querySelector(".readout");
+  if (G?.custom) { S.min = minute; return customCrosshair(scope, G, minute); }
   if (!G) { if (ro) ro.innerHTML = readoutHTML(null); return; }
   S.min = minute;
   const { x, y, T, pb } = G;
@@ -600,7 +604,7 @@ function defaultMinute() {
 }
 function applyHighlight(scope) {
   scope.querySelectorAll("[data-line]").forEach(el => {
-    const k = el.getAttribute("data-line");
+    const raw = el.getAttribute("data-line"), k = raw.includes("|") ? raw.split("|")[1] : raw;
     el.style.opacity = !S.sel || k === S.sel || k === "obs" ? "" : ".12";
     if (el.tagName.toLowerCase() === "path" && k !== "obs") el.setAttribute("stroke-width", S.sel && k === S.sel ? "3.4" : "1.7");
   });
@@ -848,9 +852,216 @@ function renderOverview() {
     <div class="ovfoot">Averages use the ${ids.length} models switched on · <button class="linkbtn" data-open-models>Change models</button></div>`;
 }
 
+// ---------- Custom overlay tab ----------
+// Colour = parameter, line pattern = model.
+const CP = {
+  temp:   { label: "Temperature", v: "temperature_2m", g: "temp", color: "#ff6b6b" },
+  feels:  { label: "Feels like", v: "apparent_temperature", g: "temp", color: "#ff9f43" },
+  dew:    { label: "Dew point", v: "dew_point_2m", g: "temp", color: "#3ee6a0" },
+  cloud:  { label: "Cloud cover", v: "cloud_cover", g: "pct", color: "#9aa8d6" },
+  precip: { label: "Precip (hourly)", v: "precipitation", g: "precip", color: "#4cc9f0" },
+  wind:   { label: "Wind", v: "wind_speed_10m", g: "wind", color: "#b388ff" },
+  gust:   { label: "Gusts", v: "wind_gusts_10m", g: "wind", color: "#f0abfc", dots: true },
+  cape:   { label: "CAPE", v: "cape", g: "cape", color: "#ffd166" },
+  srh:    { label: "Helicity (est.)", v: "srh", g: "srh", color: "#f72585" },
+};
+const CGROUP = { temp: "temp", pct: "cloud", precip: "precip", wind: "wind", cape: "cape", srh: "srh" };   // group → PARAMS key for units/format
+const DASHES = ["", "7 4", "2 3.5", "11 3 2 3", "1 5", "16 5"];
+const DASH_NAME = ["solid", "dashed", "dotted", "dash-dot", "sparse dots", "long dash"];
+const MAX_CP = 5, MAX_CM = 6;
+const cpk = g => CGROUP[g];
+const cConv = g => conv(cpk(g), g === "precip" ? "hr" : undefined);
+const cFmt = (g, v) => fv(cpk(g), v, g === "precip" ? "hr" : undefined);
+const cUnit = g => unitOf(cpk(g), g === "precip" ? "hr" : undefined);
+function cModels() { const ok = new Set(avail("temperature_2m")); return S.cmodels.filter(id => ok.has(id)).slice(0, MAX_CM); }
+const dashOf = id => DASHES[Math.max(0, cModels().indexOf(id)) % DASHES.length];
+const dashSample = (dash, color = "#fff", w = 26) => `<svg class="dsm" viewBox="0 0 ${w} 8" width="${w}" height="8"><line x1="1" y1="4" x2="${w - 1}" y2="4" stroke="${color}" stroke-width="2.2" stroke-dasharray="${dash}" stroke-linecap="${dash.startsWith("1 ") || dash.startsWith("2 ") ? "round" : "butt"}"/></svg>`;
+
+function customSeries() {
+  const D = S.data, ws = S.start * 1440, we = ws + S.range * 1440, ids = cModels(), out = [];
+  for (const p of S.cparams) {
+    const P = CP[p]; if (!P) continue;
+    const c = cConv(P.g), per = [];
+    for (const id of ids) {
+      const a = D.raw[P.v]?.[id]; if (!a) continue;
+      const pts = [];
+      for (let k = 0; k < a.length; k++) { const m = D.mins[k]; if (m >= ws && m <= we && a[k] != null) pts.push({ m: m - ws, v: c(a[k]), k }); }
+      if (pts.length) per.push({ key: `${p}|${id}`, p, id, pts });
+    }
+    if (!per.length) continue;
+    if (S.cavg) {
+      const byM = new Map();
+      for (const s of per) for (const q of s.pts) { const a = byM.get(q.m); a ? a.push(q.v) : byM.set(q.m, [q.v]); }
+      const pts = [...byM.keys()].sort((a, b) => a - b).map(m => { const a = byM.get(m); return { m, v: mean(a), lo: Math.min(...a), hi: Math.max(...a), n: a.length }; });
+      out.push({ key: `${p}|avg`, p, id: "avg", pts, n: per.length });
+    } else out.push(...per);
+  }
+  return out;
+}
+function niceRange(g, vals, H) {
+  let lo = Math.min(...vals), hi = Math.max(...vals), step;
+  if (g === "temp") { lo = Math.floor(lo - 1); hi = Math.ceil(hi + 1); const r = hi - lo; step = r > 45 ? 10 : r > 22 ? 5 : r > 9 ? 2 : r > 4 ? 1 : 0.5; }
+  else if (g === "pct") { lo = 0; hi = 100; step = H < 160 ? 50 : 25; }
+  else {
+    const minTop = { precip: precipU() === "in" ? 0.1 : 2, wind: 20, cape: 500, srh: 100 }[g] || 1;
+    lo = Math.min(0, lo); hi = Math.max(hi * 1.08, minTop);
+    step = niceStep(hi - lo, H < 160 ? 3 : 4); hi = Math.ceil(hi / step) * step; lo = Math.floor(lo / step) * step;
+  }
+  return { lo, hi, step };
+}
+function customSVG(W, H) {
+  const D = S.data, series = customSeries(), span = S.range * 1440, multi = S.range > 1;
+  if (!series.length) return { svg: "", G: null };
+  const groups = [...new Set(series.map(s => CP[s.p].g))];
+  const panels = []; for (let i = 0; i < groups.length; i += 2) panels.push(groups.slice(i, i + 2));
+  const hasRight = panels.some(p => p.length > 1);
+  const L = 44, R = hasRight ? 46 : 12, T = 18, B = 26, gap = 22;
+  const ph = (H - T - B - gap * (panels.length - 1)) / panels.length;
+  const x = m => L + (m / span) * (W - L - R);
+  const scale = {};                                    // group → {y, lo, hi, step, top, bot}
+  panels.forEach((pg, pi) => {
+    const top = T + pi * (ph + gap), bot = top + ph;
+    for (const g of pg) {
+      const vals = series.filter(s => CP[s.p].g === g).flatMap(s => s.pts.flatMap(q => q.hi != null ? [q.lo, q.hi] : [q.v]));
+      const r = niceRange(g, vals, ph);
+      scale[g] = { ...r, top, bot, y: v => top + (1 - (v - r.lo) / (r.hi - r.lo)) * (bot - top) };
+    }
+  });
+  const dec = st => st < 0.1 ? 2 : st < 1 ? 1 : 0;
+  const suffix = g => g === "temp" ? "°" : g === "pct" ? "%" : "";
+  let grid = "", frame = "";
+  panels.forEach((pg, pi) => {
+    const [gl, gr] = pg, sl = scale[gl];
+    for (let v = Math.ceil(sl.lo / sl.step) * sl.step; v <= sl.hi + 1e-9; v += sl.step)
+      grid += `<line x1="${L}" x2="${W - R}" y1="${sl.y(v)}" y2="${sl.y(v)}" stroke="rgba(255,255,255,.07)"/><text x="${L - 7}" y="${sl.y(v) + 4}" text-anchor="end" font-size="10.5" fill="rgba(226,231,255,.55)">${v.toFixed(dec(sl.step))}${suffix(gl)}</text>`;
+    grid += `<text x="${L - 7}" y="${sl.top - 6}" text-anchor="end" font-size="10" font-weight="700" fill="rgba(226,231,255,.55)">${esc(cUnit(gl))}</text>`;
+    if (gr) {
+      const sr = scale[gr];
+      for (let v = Math.ceil(sr.lo / sr.step) * sr.step; v <= sr.hi + 1e-9; v += sr.step)
+        grid += `<text x="${W - R + 7}" y="${sr.y(v) + 4}" font-size="10.5" fill="rgba(226,231,255,.55)">${v.toFixed(dec(sr.step))}${suffix(gr)}</text>`;
+      grid += `<text x="${W - R + 7}" y="${sr.top - 6}" font-size="10" font-weight="700" fill="rgba(226,231,255,.55)">${esc(cUnit(gr))}</text>`;
+    }
+    frame += `<rect x="${L}" y="${sl.top}" width="${W - L - R}" height="${sl.bot - sl.top}" fill="none" stroke="rgba(255,255,255,.06)"/>`;
+  });
+  const pTop = T, pBot = H - B;
+  let xl = "";
+  const lab = (m, t, bold) => `<text x="${x(m)}" y="${H - 8}" text-anchor="middle" font-size="11" font-weight="${bold ? 700 : 500}" fill="${bold ? "#fff" : "rgba(226,231,255,.5)"}">${t}</text>`;
+  const vl = (m, a) => panels.map((_, pi) => { const t = T + pi * (ph + gap); return `<line x1="${x(m)}" x2="${x(m)}" y1="${t}" y2="${t + ph}" stroke="rgba(255,255,255,${a})"/>`; }).join("");
+  if (!multi) { const every = W < 520 ? 6 : 3; for (let h = 0; h <= 24; h += every) xl += vl(h * 60, ".04") + lab(h * 60, h % 24 === 0 ? "12a" : h === 12 ? "12p" : h < 12 ? `${h}a` : `${h - 12}p`); }
+  else {
+    const ti = todayIdx() - S.start, perDay = (W - L - R) / S.range;
+    for (let i = 0; i < S.range; i++) { if (i) xl += vl(i * 1440, ".14"); const d = D.dates[S.start + i]; if (d) xl += lab(i * 1440 + 720, perDay > 52 ? dayShort(d) : perDay > 22 ? String(dObj(d).getUTCDate()) : (i % 2 ? "" : String(dObj(d).getUTCDate())), i === ti); }
+  }
+  const nm = nowMin() - S.start * 1440;
+  const nowSvg = nm > 0 && nm < span ? panels.map((_, pi) => { const t = T + pi * (ph + gap); return `<rect x="${L}" y="${t}" width="${Math.max(0, x(nm) - L)}" height="${ph}" fill="rgba(255,255,255,.035)"/><line x1="${x(nm)}" x2="${x(nm)}" y1="${t}" y2="${t + ph}" stroke="rgba(255,255,255,.45)" stroke-dasharray="2 3"/>`; }).join("") + `<text x="${x(nm) + 4}" y="${T + 10}" font-size="10.5" fill="rgba(255,255,255,.8)">now</text>` : "";
+  const path = (pts, y, f = q => q.v) => { let d = "", prev = null; for (const q of pts) { d += `${!prev || q.m - prev.m > 90 ? "M" : "L"}${x(q.m).toFixed(1)},${y(f(q)).toFixed(1)}`; prev = q; } return d; };
+  let bands = "", lines = "";
+  const dotR = S.range <= 1 ? 2.6 : S.range <= 3 ? 2 : S.range <= 7 ? 1.5 : 1.1;
+  for (const s of series) {
+    const P = CP[s.p], sc = scale[P.g], col = P.color;
+    if (s.id === "avg" && s.n > 1) bands += `<path d="M${s.pts.map(q => `${x(q.m).toFixed(1)},${sc.y(q.hi).toFixed(1)}`).join("L")}L${s.pts.slice().reverse().map(q => `${x(q.m).toFixed(1)},${sc.y(q.lo).toFixed(1)}`).join("L")}Z" fill="${col}" opacity=".13"/>`;
+    if (P.dots) {
+      const shape = s.id === "avg" ? 0 : cModels().indexOf(s.id);
+      lines += `<g data-line="${s.key}" fill="${col}" stroke="${col}" stroke-width="0" opacity=".95">${s.pts.map(q => dotShape(shape, x(q.m), sc.y(q.v), dotR + (shape > 0 ? .4 : 0))).join("")}</g>`;
+    } else lines += `<path data-line="${s.key}" d="${path(s.pts, sc.y)}" fill="none" stroke="${col}" stroke-width="1.9" stroke-dasharray="${s.id === "avg" ? "" : dashOf(s.id)}" stroke-linejoin="round" opacity=".95"/>`;
+  }
+  const G = { W, H, L, R, T: pTop, pb: pBot, x, span, multi, custom: true, series, scale };
+  const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Custom overlay" style="touch-action:none">
+    ${grid}${frame}${xl}${nowSvg}${bands}${lines}<g class="xh"></g>
+    <rect class="hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/></svg>`;
+  return { svg, G };
+}
+// Gust dots: a different marker per model (circle, square, triangle, diamond, ring, cross)
+function dotShape(i, cx, cy, r) {
+  cx = +cx.toFixed(1); cy = +cy.toFixed(1);
+  switch (i % 6) {
+    case 1: return `<rect x="${cx - r}" y="${cy - r}" width="${2 * r}" height="${2 * r}"/>`;
+    case 2: return `<path d="M${cx},${cy - r * 1.25}L${cx + r * 1.15},${cy + r * .9}L${cx - r * 1.15},${cy + r * .9}Z"/>`;
+    case 3: return `<path d="M${cx},${cy - r * 1.3}L${cx + r * 1.3},${cy}L${cx},${cy + r * 1.3}L${cx - r * 1.3},${cy}Z"/>`;
+    case 4: return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke-width="1.3"/>`;
+    case 5: return `<path d="M${cx - r},${cy - r}L${cx + r},${cy + r}M${cx + r},${cy - r}L${cx - r},${cy + r}" fill="none" stroke-width="1.5"/>`;
+    default: return `<circle cx="${cx}" cy="${cy}" r="${r}"/>`;
+  }
+}
+const DOT_NAME = ["circle", "square", "triangle", "diamond", "ring", "cross"];
+function dotSample(i, color) { return `<svg class="dsm" viewBox="0 0 14 10" width="14" height="10"><g fill="${color}" stroke="${color}" stroke-width="0">${dotShape(i, 7, 5, 3)}</g></svg>`; }
+
+function customReadout(G, minute) {
+  const D = S.data, ids = cModels();
+  const at = s => s.pts.find(q => q.m === minute);
+  let html = `<div class="rhead"><b>${hhmm(minute, G.multi)}</b><small>${S.cavg ? `average of ${ids.length} models` : `${ids.length} model${ids.length > 1 ? "s" : ""}`}</small></div>`;
+  for (const p of S.cparams) {
+    const P = CP[p], ss = G.series.filter(s => s.p === p); if (!ss.length) continue;
+    html += `<div class="cgrp"><div class="cgh"><i style="background:${P.color}"></i><b>${esc(P.label)}</b><small>${esc(cUnit(P.g))}</small></div>`;
+    if (S.cavg) {
+      const q = at(ss[0]);
+      html += `<div class="crow"><span>Average${q && q.n > 1 ? ` <small>range ${cFmt(P.g, q.lo)}–${cFmt(P.g, q.hi)}</small>` : ""}</span><b>${q ? cFmt(P.g, q.v) : "–"}</b></div>`;
+    } else for (const s of ss) {
+      const q = at(s), mi = ids.indexOf(s.id);
+      html += `<button class="crow rrow${S.sel === s.id ? " sel" : S.sel ? " dim" : ""}" data-id="${s.id}">${P.dots ? dotSample(mi, P.color) : dashSample(dashOf(s.id), P.color)}<span>${esc(META(s.id).short)}</span><b>${q ? cFmt(P.g, q.v) : "–"}</b></button>`;
+    }
+    html += `</div>`;
+  }
+  if (S.cparams.includes("srh")) html += `<div class="srhnote">${srhNote()}</div>`;
+  return html;
+}
+function customCrosshair(scope, G, minute) {
+  let dots = "";
+  for (const s of G.series) {
+    if (S.sel && s.id !== S.sel && s.id !== "avg") continue;
+    const q = s.pts.find(q => q.m === minute); if (!q) continue;
+    dots += `<circle cx="${G.x(q.m)}" cy="${G.scale[CP[s.p].g].y(q.v)}" r="3.4" fill="${CP[s.p].color}" stroke="#0a0e22" stroke-width="1.5"/>`;
+  }
+  const xh = scope.querySelector(".xh");
+  if (xh) xh.innerHTML = `<line x1="${G.x(minute)}" x2="${G.x(minute)}" y1="${G.T}" y2="${G.pb}" stroke="rgba(255,255,255,.55)"/>${dots}`;
+  const ro = scope.querySelector(".readout"); if (ro) ro.innerHTML = customReadout(G, minute);
+}
+function customSummary() {
+  const series = customSeries(); if (!series.length) return "";
+  const parts = [];
+  for (const p of S.cparams) {
+    const P = CP[p], ss = series.filter(s => s.p === p); if (!ss.length) continue;
+    // average across models, hour by hour
+    const byM = new Map(); for (const s of ss) for (const q of s.pts) { const a = byM.get(q.m); a ? a.push(q.v) : byM.set(q.m, [q.v]); }
+    const av = [...byM.values()].map(mean);
+    const txt = P.g === "temp" ? `${fmt(Math.min(...av))}–${fmt(Math.max(...av))}°` : P.g === "pct" ? `avg ${Math.round(mean(av))}%` : P.g === "precip" ? `${cFmt("precip", av.reduce((a, b) => a + b, 0))} ${cUnit("precip")}` : `peak ${cFmt(P.g, Math.max(...av))}`;
+    parts.push(`<span class="csum"><i style="background:${P.color}"></i>${esc(P.label)} <b>${txt}</b></span>`);
+  }
+  return parts.join(" ");
+}
+function renderBuilder() {
+  const ids = avail("temperature_2m"), sel = cModels();
+  const pChips = Object.entries(CP).map(([k, P]) => {
+    const on = S.cparams.includes(k);
+    return `<button class="cchip${on ? " on" : ""}" data-cp="${k}" style="--c:${P.color}" aria-pressed="${on}">${P.dots ? `<span class="cdots"></span>` : `<span class="cline"></span>`}${esc(P.label)}</button>`;
+  }).join("");
+  const showAll = S.cmOpen || ids.length <= 10;
+  const mChips = ids.filter(id => showAll || sel.includes(id)).map(id => {
+    const i = sel.indexOf(id), on = i >= 0;
+    return `<button class="mchip${on ? " on" : ""}" data-cm="${id}" aria-pressed="${on}">${on ? dashSample(DASHES[i], "#fff", 22) : `<i style="background:${colorOf(id)}"></i>`}${esc(META(id).short)}</button>`;
+  }).join("");
+  const key = S.cavg ? `<span class="kn">Solid line = average of the selected models · shaded = their range</span>`
+    : sel.map((id, i) => `<span class="ki">${dashSample(DASHES[i], "#fff", 28)}${dotSample(i, "#fff")}<b>${esc(META(id).short)}</b></span>`).join("");
+  $("builder").innerHTML = `
+    <div class="bsec"><div class="bh"><b>Parameters</b><small>${S.cparams.length}/${MAX_CP} · colour = parameter</small></div><div class="bchips">${pChips}</div></div>
+    <div class="bsec"><div class="bh"><b>Models</b><small>${sel.length}/${MAX_CM} · line pattern = model</small>
+      <div class="seg sm2"><button data-cavg="0" class="${S.cavg ? "" : "on"}">Each model</button><button data-cavg="1" class="${S.cavg ? "on" : ""}">Average</button></div></div>
+      <div class="bchips">${mChips}${ids.length > 10 ? `<button class="mchip more" data-cmopen>${S.cmOpen ? "Done" : `+ Add models <small>${ids.length - sel.length} more</small>`}</button>` : ""}</div></div>
+    <div class="bkey">${key}</div>`;
+}
+function flash(msg) {
+  let el = document.querySelector(".toast"); if (!el) { el = document.createElement("div"); el.className = "toast"; document.body.appendChild(el); }
+  el.textContent = msg; el.classList.add("on"); clearTimeout(flash.t); flash.t = setTimeout(() => el.classList.remove("on"), 2200);
+}
+
 // ---------- Render ----------
 function chartDims(el) {
   const W = Math.max(300, Math.round(el.clientWidth || 340));
+  if (S.tab === "custom") {
+    const np = Math.max(1, Math.ceil(new Set(S.cparams.map(p => CP[p]?.g)).size / 2));
+    const base = W < 600 ? Math.max(250, W * 0.72) : Math.min(500, Math.max(300, W * 0.48));
+    return { W, H: Math.round(np === 1 ? base : base * (0.62 + 0.38 * np)) };
+  }
   const H = W < 600 ? Math.round(Math.max(250, W * 0.72)) : Math.round(Math.min(500, Math.max(300, W * 0.48)));
   return { W, H };
 }
@@ -876,8 +1087,9 @@ function renderAll() {
   renderHeader(); renderTabs(); renderToolbar();
   if (ov) renderOverview();
   else {
-    if (S.tab === "srh" && !S.data.srhState) loadSRH();
-    renderDays(); renderMain(); renderTable();
+    if ((S.tab === "srh" || S.tab === "custom" && S.cparams.includes("srh")) && !S.data.srhState) loadSRH();
+    if (S.tab === "custom") renderBuilder();
+    renderDays(); renderMain(); if (S.tab !== "custom") renderTable();
   }
   if (!$("modelsModal").hidden) renderModelsSheet();
 }
@@ -960,6 +1172,12 @@ document.addEventListener("click", e => {
   if (go) { S.range = 1; LS.set("range", 1); S.start = +go.dataset.goto; location.hash = "temp"; return setTab("temp"); }
   const day = t.closest(".day, .dt thead th[data-i]"); if (day) return setStart(+day.dataset.i);
   const ol = t.closest("[data-ol]"); if (ol) { S.outlook = +ol.dataset.ol; LS.set("outlook", S.outlook); return renderOverview(); }
+  const cpb = t.closest("[data-cp]");
+  if (cpb) { const k = cpb.dataset.cp, a = S.cparams; if (a.includes(k)) { if (a.length > 1) a.splice(a.indexOf(k), 1); } else if (a.length < MAX_CP) a.push(k); else return flash(`Up to ${MAX_CP} parameters`); LS.set("cparams", a); return renderAll(); }
+  const cmb = t.closest("[data-cm]");
+  if (cmb) { const id = cmb.dataset.cm, cur = cModels(); if (cur.includes(id)) { if (cur.length > 1) S.cmodels = cur.filter(x => x !== id); } else if (cur.length < MAX_CM) S.cmodels = [...cur, id]; else return flash(`Up to ${MAX_CM} models, so each gets its own line pattern`); if (S.sel && !S.cmodels.includes(S.sel)) S.sel = ""; LS.set("cmodels", S.cmodels); return renderAll(); }
+  if (t.closest("[data-cmopen]")) { S.cmOpen = !S.cmOpen; return renderBuilder(); }
+  const cav = t.closest("[data-cavg]"); if (cav) { S.cavg = cav.dataset.cavg === "1"; LS.set("cavg", S.cavg); S.sel = ""; return renderAll(); }
   const md = t.closest("#modes button");
   if (md) { S.mode[paramKey()] = md.dataset.mode; LS.set("mode2", S.mode); S.sel = ""; return renderAll(); }
   const rb = t.closest("#range button");

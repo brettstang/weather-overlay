@@ -40,3 +40,6 @@ Open-Meteo's free API is for **non-commercial use**. A paid product needs an Ope
 - and the Overview ranks models by average error.
 
 Past-day model values come from Open-Meteo's Previous Runs API (`temperature_2m_previous_day1` etc.), so the bias scores the forecast made 1 day before (changeable to 2, 3 days or latest run in Chart options).
+
+## Custom tab
+Pick up to 5 parameters and up to 6 models to overlay together. **Colour = parameter, line pattern = model** (solid, dashed, dotted, dash-dot…); gusts are dots with a different marker shape per model. Parameters with different units get left/right axes; more than two unit types stack into panels on a shared time axis. "Average" mode draws one line per parameter with the models' range shaded.
