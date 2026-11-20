@@ -44,7 +44,7 @@ const TAB_LABEL = { overview: "Overview", temp: "Temp", feels: "Feels like", dew
 const S = {
   loc: null, data: null, tab: "overview",
   unit: LS.get("unit", "C"), windU: LS.get("windU", null), precipU: LS.get("precipU", null),
-  range: LS.get("range", 1), start: PAST_DAYS,
+  rsel: LS.get("range", 1), range: 1, start: PAST_DAYS,
   shown: new Set(LS.get("shown", CORE_MODELS)), preset: LS.get("preset", "core"),
   spread: LS.get("spread", true), lines: LS.get("lines", { low: null, high: null, unit: "C" }),
   mode: LS.get("mode2", { precip: LS.get("mode", {}).precip || "acc", wind: "both" }),
@@ -54,6 +54,11 @@ const S = {
 };
 S.shown.delete("blend");
 
+// Forecast convention: "3 days" = the 3 days after today, so multi-day views show today + N days.
+function applyRange() {
+  const sel = S.rsel, n = S.data ? S.data.dates.length : 99, room = S.data ? n - Math.min(S.start, todayIdx()) : 99;
+  S.range = sel === 1 ? 1 : Math.max(2, Math.min(sel + 1, n, sel >= 10 ? room : n));
+}
 const QUICK = [
   { name: "New York", admin1: "New York", country: "United States", lat: 40.7128, lon: -74.006 },
   { name: "Chicago", admin1: "Illinois", country: "United States", lat: 41.8781, lon: -87.6298 },
@@ -666,7 +671,7 @@ function renderToolbar() {
   $("mcount").textContent = ids.length;
   $("mdots").innerHTML = ids.slice(0, 4).map(id => `<i style="background:${colorOf(id)}"></i>`).join("");
   $("optsBtn").classList.toggle("active", S.lines.low != null || S.lines.high != null);
-  document.querySelectorAll("#range button").forEach(b => b.classList.toggle("on", +b.dataset.r === S.range));
+  document.querySelectorAll("#range button").forEach(b => b.classList.toggle("on", +b.dataset.r === S.rsel));
   document.querySelectorAll(".unit button").forEach(b => b.classList.toggle("on", b.dataset.unit === S.unit));
   $("prevBtn").disabled = S.start <= 0;
   $("nextBtn").disabled = S.start + S.range >= S.data.dates.length;
@@ -777,7 +782,7 @@ function ovSource() {
 function ovIds(v) { const s = ovSource(); if (s.multi) return ovPick().filter(id => S.data.raw[v]?.[id]); return s.single ? (S.data.raw[v]?.[s.single] ? [s.single] : []) : visibleFor(v); }
 function ovWin() {
   const D = S.data, ws = todayIdx() * 1440, last = D.mins[D.mins.length - 1];
-  return { ws, span: Math.min(S.ovRange * 1440, last - ws) };
+  return { ws, span: Math.min((S.ovRange + 1) * 1440, last - ws) };
 }
 // Hour-by-hour value (average across the source models) inside the window, raw units
 function ovSeries(v) {
@@ -1570,7 +1575,7 @@ document.addEventListener("click", e => {
   const rr = t.closest(".rrow"); if (rr) return selectModel(rr.dataset.id);
   if (t.closest("[data-open-models]")) { renderModelsSheet(); return openModal("modelsModal"); }
   const go = t.closest("[data-goto]");
-  if (go) { S.range = 1; LS.set("range", 1); S.start = +go.dataset.goto; location.hash = "temp"; return setTab("temp"); }
+  if (go) { S.rsel = 1; S.range = 1; LS.set("range", 1); S.start = +go.dataset.goto; location.hash = "temp"; return setTab("temp"); }
   const day = t.closest(".day, .dt thead th[data-i]"); if (day) return setStart(+day.dataset.i);
   const ol = t.closest("[data-ol]"); if (ol) { S.outlook = +ol.dataset.ol; LS.set("outlook", S.outlook); return renderOverview(); }
   const ovm = t.closest("[data-ovm]");
@@ -1588,7 +1593,7 @@ document.addEventListener("click", e => {
   const md = t.closest("#modes button");
   if (md) { S.mode[paramKey()] = md.dataset.mode; LS.set("mode2", S.mode); S.sel = ""; return renderAll(); }
   const rb = t.closest("#range button");
-  if (rb) { S.range = +rb.dataset.r; LS.set("range", S.range); if (S.range >= 10 && S.start < todayIdx()) S.start = todayIdx(); return setStart(S.start); }
+  if (rb) { S.rsel = +rb.dataset.r; LS.set("range", S.rsel); if (S.rsel > 1 && S.start < todayIdx() && S.rsel >= 3) S.start = todayIdx(); applyRange(); return setStart(S.start); }
   const ub = t.closest(".unit button");
   if (ub) { S.unit = ub.dataset.unit; LS.set("unit", S.unit); syncUnitOpts(); return renderAll(); }
   const ld = t.closest("[data-lead]"); if (ld) { S.lead = +ld.dataset.lead; LS.set("lead", S.lead); S.data && S.data.memo.clear(); syncUnitOpts(); return renderAll(); }
@@ -1736,7 +1741,7 @@ async function loadLocation(p, keepView, tab) {
   if (!keepView) { $("hero").hidden = true; $("view").hidden = true; status(`Loading every model for ${S.loc.name}…`); }
   try {
     const D = await fetchForecast(S.loc.lat, S.loc.lon);
-    S.data = D; loadVerification(D);
+    S.data = D; loadVerification(D); applyRange();
     if (!keepView) { S.start = todayIdx(); S.sel = ""; }
     S.start = Math.max(0, Math.min(D.dates.length - S.range, S.start));
     S.min = null;
