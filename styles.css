@@ -599,3 +599,7 @@ body[data-tab="custom"] .tablecard, body[data-tab="custom"] #modelsBtn { display
 .ovtip .ttr b { color: #fff; margin-left: 10px; }
 .ovtip .tts { color: var(--faint); font-size: 11px; margin: -2px 0 2px 15px; }
 @media (hover: hover) and (pointer: fine) { .ovc svg { cursor: crosshair; } }
+.ovpick { padding: 12px 14px; margin: -2px 0 12px; }
+.ovpick .mchip.on { color: #fff; background: rgba(255,255,255,.08); }
+.lg-sep { width: 1px; height: 12px; background: var(--stroke-2); margin: 0 2px; }
+.ovleg svg { flex: none; }
