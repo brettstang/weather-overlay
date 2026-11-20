@@ -587,3 +587,15 @@ body[data-tab="custom"] .tablecard, body[data-tab="custom"] #modelsBtn { display
   .ovv { text-align: left; font-size: 12px; }
   .ovsel { flex: 1 1 100%; } .ovsel select { max-width: none; flex: 1; }
 }
+.ovc { position: relative; }
+.ovtip { position: absolute; left: 0; top: 0; z-index: 5; pointer-events: none; min-width: 190px; padding: 9px 11px; border-radius: 10px;
+  background: rgba(16,20,48,.94); border: 1px solid rgba(255,255,255,.18); box-shadow: 0 10px 30px rgba(0,0,0,.45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.ovtip[hidden] { display: none; }
+.ovtip .tth { font-weight: 700; font-size: 12px; color: #fff; margin-bottom: 5px; white-space: nowrap; }
+.ovtip .ttr { display: flex; align-items: center; gap: 7px; line-height: 1.6; white-space: nowrap; }
+.ovtip .ttr i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.ovtip .ttr span { color: var(--muted); flex: 1; }
+.ovtip .ttr b { color: #fff; margin-left: 10px; }
+.ovtip .tts { color: var(--faint); font-size: 11px; margin: -2px 0 2px 15px; }
+@media (hover: hover) and (pointer: fine) { .ovc svg { cursor: crosshair; } }

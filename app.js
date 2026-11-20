@@ -860,6 +860,9 @@ function ovTempPanel(W) {
   const st = S.data.obs?.station;
   return { key: "temp", title: "Temperature & humidity", F, svg: g,
     legend: leg("line", "#ff6b6b", "Temperature") + leg("line", "#3ee6a0", "Dew point") + leg("dash", "#ff9f43", "Feels like") + (RH.length ? leg("area", "#6ea8ff", "Rel. humidity") : "") + (oT.length ? leg("dot", "#fff", `Observed ${st.id}`) : "") + (!ovSource().single ? leg("area", "rgba(255,107,107,.5)", "Model range") : ""),
+    tip: m => { const t = nearest(T, m), d = nearest(Dp, m), f = nearest(Fl, m), h = nearest(RH, m), o = nearest(oT, m), od = nearest(oD, m), U = `°${S.unit}`;
+      return [t && ["Temp", `${fmt(cvT(t.v))}${U}`, "#ff6b6b", !ovSource().single && t.n > 1 ? `models ${fmt(cvT(t.lo))} to ${fmt(cvT(t.hi))}` : ""], d && ["Dew point", `${fmt(cvT(d.v))}${U}`, "#3ee6a0"], f && ["Feels like", `${fmt(cvT(f.v))}${U}`, "#ff9f43"],
+              h && ["RH", `${Math.round(h.v)}%`, "#6ea8ff"], o && [`Obs ${st.id} temp`, `${fmt(cvT(o.v))}${U}`, "#fff"], od && [`Obs ${st.id} dew`, `${fmt(cvT(od.v))}${U}`, "#fff"]]; },
     read: m => { const t = nearest(T, m), d = nearest(Dp, m), f = nearest(Fl, m), h = nearest(RH, m), o = nearest(oT, m);
       return `${t ? `<b class="c-t">${fmt(cvT(t.v))}°</b>` : ""}${d ? ` dew <b class="c-d">${fmt(cvT(d.v))}°</b>` : ""}${f ? ` feels <b class="c-f">${fmt(cvT(f.v))}°</b>` : ""}${h ? ` RH <b>${Math.round(h.v)}%</b>` : ""}${o ? ` · obs <b>${fmt(cvT(o.v))}°</b>` : ""}`; },
     dots: m => { const t = nearest(T, m); return t ? [[t.m, y(cvT(t.v)), "#ff6b6b"]] : []; } };
@@ -893,6 +896,10 @@ function ovPrecipPanel(W) {
   }
   return { key: "precip", title: "Precipitation & cloud", F, svg: g,
     legend: leg("bar", PT_COLOR.rain, "Rain /h") + leg("bar", PT_COLOR.snow, "Snow /h") + leg("bar", PT_COLOR.mix, "Mix /h") + leg("line", "#4c8dff", `Total precip`) + (sacc > 0.05 ? leg("dash", "#e9f1ff", `Total snow (${inch ? "in" : "cm"})`) : "") + (C.length ? leg("area", "#9aa8d6", "Cloud cover") : ""),
+    tip: m => { const p = nearest(P, m), a = nearest(A, m), c = nearest(C, m), sa = nearest(SA, m), pu = precipU(), su = inch ? "in" : "cm";
+      let ty = ""; if (p && p.v >= 0.05) { const cnt = { rain: 0, snow: 0, mix: 0 }; for (const id of ids) { const t = ptype(id, p.k); if (t) cnt[t]++; } const top = Object.entries(cnt).sort((x, y) => y[1] - x[1])[0]; if (top[1]) ty = ` ${PT_LABEL[top[0]].toLowerCase()}`; }
+      return [p && ["1 hr precip", `${fv("precip", cvP(p.v), "hr")} ${pu}${ty}`, ty.includes("snow") ? PT_COLOR.snow : ty.includes("mix") ? PT_COLOR.mix : PT_COLOR.rain], a && ["Total precip", `${fv("precip", cvP(a.v), "hr")} ${pu}`, "#4c8dff"],
+              sa && sa.v > 0.05 && ["Total snow", `${fv("precip", cvS(sa.v), "snow")} ${su}`, "#e9f1ff"], c && ["Cloud cover", `${Math.round(c.v)}%`, "#9aa8d6"]]; },
     read: m => { const p = nearest(P, m), a = nearest(A, m), c = nearest(C, m), sa = nearest(SA, m);
       return `${p ? `<b class="c-p">${fv("precip", cvP(p.v), "hr")}</b> ${precipU()}/h` : ""}${a ? ` · total <b>${fv("precip", cvP(a.v), "hr")}</b>` : ""}${sa && sa.v > 0.05 ? ` · snow <b>${fv("precip", cvS(sa.v), "snow")}</b> ${inch ? "in" : "cm"}` : ""}${c ? ` · cloud <b>${Math.round(c.v)}%</b>` : ""}`; },
     dots: m => { const a = nearest(A, m); return a ? [[a.m, y2(cvP(a.v)), "#4c8dff"]] : []; } };
@@ -925,6 +932,10 @@ function ovWindPanel(W) {
   const st2 = D.obs?.station;
   return { key: "wind", title: "Wind & pressure", F, svg: g,
     legend: leg("line", "#3ee6a0", "Wind") + leg("ring", "#9ef7c9", "Gusts") + leg("dot", "rgba(226,231,255,.7)", "Direction (arrows)") + (Pr.length ? leg("line", "#aab0c6", "Sea-level pressure") : "") + (oW.length ? leg("dot", "#fff", `Observed ${st2.id}`) : ""),
+    tip: m => { const w = nearest(Wd, m), gu = nearest(Gu, m), p = nearest(Pr, m), o = nearest(oW, m), og = nearest(oG, m), wu = WIND_L[windU()];
+      let dir = ""; if (w) { let u = 0, v = 0, n = 0; for (const id of ids) { const d = D.raw.wind_direction_10m[id]?.[w.k], s = D.raw.wind_speed_10m[id]?.[w.k]; if (d != null && s != null) { u += s * Math.sin(d * Math.PI / 180); v += s * Math.cos(d * Math.PI / 180); n++; } } if (n) { const deg = Math.round((Math.atan2(u, v) * 180 / Math.PI + 360) % 360); dir = `${compass(deg)} (${deg}°) at `; } }
+      return [w && ["Wind", `${dir}${Math.round(cvW(w.v))} ${wu}`, "#3ee6a0"], gu && ["Gusts", `${Math.round(cvW(gu.v))} ${wu}`, "#9ef7c9"], p && ["Pressure", `${p.v.toFixed(1)} hPa`, "#aab0c6"],
+              o && [`Obs ${st2.id} wind`, `${Math.round(cvW(o.v))} ${wu}`, "#fff"], og && [`Obs ${st2.id} gust`, `${Math.round(cvW(og.v))} ${wu}`, "#fff"]]; },
     read: m => { const w = nearest(Wd, m), gu = nearest(Gu, m), p = nearest(Pr, m), o = nearest(oW, m);
       return `${w ? `<b class="c-w">${Math.round(cvW(w.v))}</b>` : ""}${gu ? ` gust <b class="c-g">${Math.round(cvW(gu.v))}</b>` : ""} ${esc(WIND_L[windU()])}${p ? ` · <b>${p.v.toFixed(1)}</b> hPa` : ""}${o ? ` · obs <b>${Math.round(cvW(o.v))}</b>` : ""}`; },
     dots: m => { const w = nearest(Wd, m); return w ? [[w.m, y(cvW(w.v)), "#3ee6a0"]] : []; } };
@@ -947,6 +958,7 @@ function ovStormPanel(W) {
   const srhMsg = S.data.srhState === "loading" ? " · loading helicity…" : S.data.srhState === "ok" && !H.length ? " · helicity not available from this model" : "";
   return { key: "storm", title: "CAPE & helicity", F, svg: g, note: srhMsg,
     legend: leg("area", "#ffd166", "CAPE") + leg("line", "#6ea8ff", "Helicity 0–3 km (est.)") + `<span class="lg-i lg-n">dashed = 1000 / 2500 J/kg</span>`,
+    tip: m => { const c = nearest(C, m), h = nearest(H, m); return [c && ["CAPE", `${Math.round(c.v)} J/kg`, "#ffd166"], h && ["Helicity 0–3 km", `${Math.round(h.v)} m²/s²`, "#6ea8ff"]]; },
     read: m => { const c = nearest(C, m), h = nearest(H, m); return `${c ? `CAPE <b class="c-c">${Math.round(c.v)}</b> J/kg` : ""}${h ? ` · SRH <b class="c-h">${Math.round(h.v)}</b> m²/s²` : ""}`; },
     dots: m => { const c = nearest(C, m), out = c ? [[c.m, y(c.v), "#ffd166"]] : []; const h = nearest(H, m); if (h && yh) out.push([h.m, yh(h.v), "#6ea8ff"]); return out; } };
 }
@@ -979,6 +991,23 @@ function renderOverview() {
     if (el) io.observe(el);
   }
 }
+const compass = d => ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"][Math.round(d / 22.5) % 16];
+function ovWhen(m) { const D = S.data, abs = ovWin().ws + m, di = Math.min(D.dates.length - 1, Math.floor(abs / 1440)); return `${pad(Math.floor(abs / 60) % 24)}:00 · ${dayLong(D.dates[di])}`; }
+// Floating tooltip beside the mouse (computer), like SpotWx
+function ovTip(i, m, ev) {
+  const p = OVP[i], box = document.querySelector(`[data-ovi="${i}"] .ovc`); if (!p || !box) return;
+  let tip = box.querySelector(".ovtip"); if (!tip) { tip = document.createElement("div"); tip.className = "ovtip"; box.appendChild(tip); }
+  const rows = (p.tip ? p.tip(m) : []).filter(Boolean);
+  if (!rows.length) { tip.hidden = true; return; }
+  tip.innerHTML = `<div class="tth">${ovWhen(m)}</div>` + rows.map(([l, v, c, sub]) => `<div class="ttr"><i style="background:${c}"></i><span>${esc(l)}</span><b>${esc(v)}</b></div>${sub ? `<div class="tts">${esc(sub)}</div>` : ""}`).join("");
+  tip.hidden = false;
+  const r = box.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+  let x = ev.clientX - r.left + 16, y = ev.clientY - r.top - th / 2;
+  if (x + tw > r.width - 4) x = ev.clientX - r.left - tw - 16;
+  y = Math.max(2, Math.min(r.height - th - 2, y));
+  tip.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+}
+function ovHideTips() { document.querySelectorAll(".ovtip").forEach(t => t.hidden = true); }
 function ovCursor(m) {
   const { span } = ovWin(); m = Math.max(0, Math.min(span, m)); S.ovMin = m;
   const D = S.data, ws = ovWin().ws, abs = ws + m, di = Math.min(D.dates.length - 1, Math.floor(abs / 1440));
@@ -990,7 +1019,20 @@ function ovCursor(m) {
     const v = document.querySelector(`[data-ovv="${i}"]`); if (v) v.innerHTML = `<span class="ovw">${when}</span> ${p.read(m)}`;
   });
 }
+// Computer: just moving the mouse moves the cursor on every chart and shows the tooltip
+function ovAt(svg, p, ev) { const r = svg.getBoundingClientRect(), sx = (ev.clientX - r.left) / r.width * p.F.W; return Math.max(0, Math.min(p.F.span, Math.round(((sx - p.F.L) / (p.F.W - p.F.L - p.F.R)) * p.F.span / 60) * 60)); }
+document.addEventListener("pointermove", e => {
+  if (e.pointerType !== "mouse") return;
+  const svg = e.target.closest?.("[data-ovs]");
+  if (!svg) { if (document.querySelector(".ovtip:not([hidden])")) ovHideTips(); return; }
+  const i = +svg.dataset.ovs, p = OVP[i]; if (!p) return;
+  const m = ovAt(svg, p, e);
+  if (m !== S.ovMin) ovCursor(m);
+  document.querySelectorAll(".ovtip").forEach(t => { if (!t.closest(`[data-ovi="${i}"]`)) t.hidden = true; });
+  ovTip(i, m, e);
+});
 document.addEventListener("pointerdown", e => {
+  if (e.pointerType === "mouse") return;
   const svg = e.target.closest?.("[data-ovs]"); if (!svg) return;
   const p = OVP[+svg.dataset.ovs]; if (!p) return;
   const at = ev => { const r = svg.getBoundingClientRect(), sx = (ev.clientX - r.left) / r.width * p.F.W; return Math.round(((sx - p.F.L) / (p.F.W - p.F.L - p.F.R)) * p.F.span / 60) * 60; };
@@ -1336,6 +1378,13 @@ function pointerToMinute(svg, G, cx, cy) {
   const hrs = G.span / 60;
   return Math.min(hrs, Math.round(frac * hrs)) * 60;
 }
+document.addEventListener("pointermove", e => {
+  if (e.pointerType !== "mouse" || e.buttons) return;
+  const svg = e.target.closest?.(".chart svg"); if (!svg) return;
+  const scope = scopeOf(svg), G = scope._G; if (!G) return;
+  const m = pointerToMinute(svg, G, e.clientX, e.clientY);
+  if (m !== S.min) for (const sc of scopes()) drawCrosshair(sc, m);
+});
 document.addEventListener("pointerdown", e => {
   const svg = e.target.closest?.(".chart svg"); if (!svg) return;
   const scope = scopeOf(svg), G = scope._G; if (!G) return;
