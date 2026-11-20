@@ -1,6 +1,6 @@
 // Caches the app shell so Weather Overlay opens instantly and works as an installed app.
 // Forecast requests always go to the network.
-const CACHE = "weather-overlay-v12";
+const CACHE = "weather-overlay-v13";
 const SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/models.js", "/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/apple-touch-icon.png"];
 self.addEventListener("install", e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); });
 self.addEventListener("activate", e => e.waitUntil(

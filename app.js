@@ -1007,6 +1007,9 @@ function ovTempMulti(W) {
     tip: m => [...ids.map(id => { const t = at(T[id], m), d = at(Dp[id], m), f = at(Fl[id], m), h = at(RH[id], m);
         return t && [META(id).short, `${fmt(cvT(t.v))}°${d ? ` · dew ${fmt(cvT(d.v))}°` : ""}${f ? ` · feels ${fmt(cvT(f.v))}°` : ""}${h ? ` · ${Math.round(h.v)}%` : ""}`, colorOf(id)]; }),
         at(oT, m) && [`Observed ${st.id}`, `${fmt(cvT(at(oT, m).v))}°${at(oD, m) ? ` · dew ${fmt(cvT(at(oD, m).v))}°` : ""}`, "#fff"]],
+    table: m => ({ head: ["Temp", "Dew pt", "Feels", "RH"], rows: [...ids.map(id => { const t = at(T[id], m), d = at(Dp[id], m), f = at(Fl[id], m), h = at(RH[id], m);
+        return [id, t && fmt(cvT(t.v)) + "°", d && fmt(cvT(d.v)) + "°", f && fmt(cvT(f.v)) + "°", h && Math.round(h.v) + "%"]; }),
+        ...(oT.length ? [["obs", at(oT, m) && fmt(cvT(at(oT, m).v)) + "°", at(oD, m) && fmt(cvT(at(oD, m).v)) + "°", null, null]] : [])], hi: 1 }),
     read: m => { const t = ids.map(id => at(T[id], m)).filter(Boolean).map(p => cvT(p.v)), o = at(oT, m); return `temp <b class="c-t">${span2(t, fmt)}${U}</b> across ${t.length} models${o ? ` · obs <b>${fmt(cvT(o.v))}°</b>` : ""}`; },
     dots: m => ids.map(id => { const t = at(T[id], m); return t && [t.m, y(cvT(t.v)), colorOf(id)]; }).filter(Boolean) };
 }
@@ -1050,6 +1053,8 @@ function ovPrecipMulti(W) {
     legend: modelKey(ids) + `<span class="lg-sep"></span>` + styleKey([["", "Total precip"], ...(anySnow ? [["6 4", `Total snow (${su})`]] : [])]) + leg("bar", PT_COLOR.rain, "Avg rain /h") + leg("bar", PT_COLOR.snow, "snow") + leg("bar", PT_COLOR.mix, "mix") + (hasC ? `<span class="lg-i lg-n">lower strip = cloud %</span>` : ""),
     tip: m => ids.map(id => { const a = nearest(A[id], m); if (!a) return null; const p = nearest(P[id], m), c = nearest(C[id], m), sa = nearest(SA[id], m), ty = p ? ptype(id, p.k) : null;
         return [META(id).short, `${fv("precip", cvP(a.v), "hr")} ${pu}${p && p.v >= 0.05 ? ` · ${fv("precip", cvP(p.v), "hr")}/h${ty ? " " + PT_LABEL[ty].toLowerCase() : ""}` : ""}${sa && sa.v > 0.05 ? ` · snow ${fv("precip", cvS(sa.v), "snow")} ${su}` : ""}${c ? ` · ${Math.round(c.v)}%` : ""}`, colorOf(id)]; }),
+    table: m => ({ head: [`1 hr`, `Total ${pu}`, ...(anySnow ? [`Snow ${su}`] : []), "Cloud"], rows: ids.map(id => { const p = nearest(P[id], m), a = nearest(A[id], m), sa = nearest(SA[id], m), c = nearest(C[id], m), ty = p ? ptype(id, p.k) : null;
+        return [id, p && `${fv("precip", cvP(p.v), "hr")}${ty ? `<i class="pt" style="background:${PT_COLOR[ty]}" title="${PT_LABEL[ty]}"></i>` : ""}`, a && fv("precip", cvP(a.v), "hr"), ...(anySnow ? [sa ? fv("precip", cvS(sa.v), "snow") : "0"] : []), c && Math.round(c.v) + "%"]; }), hi: 2 }),
     read: m => { const t = ids.map(id => nearest(A[id], m)).filter(Boolean).map(p => cvP(p.v)); return `total so far <b class="c-p">${span2(t, v => fv("precip", v, "hr"))}</b> ${pu} across ${t.length} models`; },
     dots: m => ids.map(id => { const a = nearest(A[id], m); return a && [a.m, y2(cvP(a.v)), colorOf(id)]; }).filter(Boolean) };
 }
@@ -1079,6 +1084,9 @@ function ovWindMulti(W) {
     tip: m => [...ids.map(id => { const w = nearest(Wd[id], m); if (!w) return null; const gu = nearest(Gu[id], m), p = nearest(Pr[id], m);
         return [META(id).short, `${dirOf(id, w.k)}${Math.round(cvW(w.v))}${gu ? ` G${Math.round(cvW(gu.v))}` : ""} ${wu}${p ? ` · ${p.v.toFixed(1)} hPa` : ""}`, colorOf(id)]; }),
         nearest(oW, m) && [`Observed ${st2.id}`, `${Math.round(cvW(nearest(oW, m).v))}${nearest(oG, m) ? ` G${Math.round(cvW(nearest(oG, m).v))}` : ""} ${wu}`, "#fff"]],
+    table: m => ({ head: ["Dir", `Wind ${wu}`, "Gust", "hPa"], rows: [...ids.map(id => { const w = nearest(Wd[id], m), gu = nearest(Gu[id], m), p = nearest(Pr[id], m), d = w ? D.raw.wind_direction_10m?.[id]?.[w.k] : null;
+        return [id, d != null ? `${compass(d)}<small> ${Math.round(d)}°</small>` : null, w && Math.round(cvW(w.v)), gu && Math.round(cvW(gu.v)), p && p.v.toFixed(1)]; }),
+        ...(oW.length ? [["obs", null, nearest(oW, m) && Math.round(cvW(nearest(oW, m).v)), nearest(oG, m) && Math.round(cvW(nearest(oG, m).v)), null]] : [])], hi: 2 }),
     read: m => { const w = ids.map(id => nearest(Wd[id], m)).filter(Boolean).map(p => cvW(p.v)), gs = ids.map(id => nearest(Gu[id], m)).filter(Boolean).map(p => cvW(p.v));
       return `wind <b class="c-w">${span2(w, Math.round)}</b>${gs.length ? ` · gusts <b class="c-g">${span2(gs, Math.round)}</b>` : ""} ${esc(wu)}`; },
     dots: m => ids.map(id => { const w = nearest(Wd[id], m); return w && [w.m, y(cvW(w.v)), colorOf(id)]; }).filter(Boolean) };
@@ -1104,6 +1112,7 @@ function ovStormMulti(W) {
   return { key: "storm", title: "CAPE & helicity", F, svg: g, note: srhMsg,
     legend: modelKey(ids) + `<span class="lg-sep"></span>` + styleKey([["", "CAPE"], ["6 4", "Helicity 0–3 km (est.)"]]),
     tip: m => ids.map(id => { const c = nearest(C[id], m), h = nearest(H[id], m); return (c || h) && [META(id).short, `${c ? `CAPE ${Math.round(c.v)}` : ""}${h ? `${c ? " · " : ""}SRH ${Math.round(h.v)}` : ""}`, colorOf(id)]; }),
+    table: m => ({ head: ["CAPE J/kg", ...(hIds.length ? ["SRH m²/s²"] : [])], rows: ids.map(id => { const c = nearest(C[id], m), h = nearest(H[id], m); return [id, c && Math.round(c.v), ...(hIds.length ? [h && Math.round(h.v)] : [])]; }), hi: 1 }),
     read: m => { const c = cIds.map(id => nearest(C[id], m)).filter(Boolean).map(p => p.v); return `CAPE <b class="c-c">${span2(c, Math.round)}</b> J/kg across ${c.length} models`; },
     dots: m => [...cIds.map(id => { const c = nearest(C[id], m); return c && [c.m, y(c.v), colorOf(id)]; }), ...(yh ? hIds.map(id => { const h = nearest(H[id], m); return h && [h.m, yh(h.v), colorOf(id)]; }) : [])].filter(Boolean) };
 }
@@ -1167,7 +1176,16 @@ function ovCursor(m) {
     const svg = document.querySelector(`[data-ovs="${i}"]`); if (!svg) return;
     const F = p.F, x = F.x(m), top = F.subs[0].top, bot = F.subs[F.subs.length - 1].bot;
     svg.querySelector(".ovxh").innerHTML = `<line x1="${x}" x2="${x}" y1="${top}" y2="${bot}" stroke="rgba(255,255,255,.55)"/>` + p.dots(m).map(([mm, yy, c]) => `<circle cx="${F.x(mm)}" cy="${yy}" r="3.6" fill="${c}" stroke="#0a0e22" stroke-width="1.5"/>`).join("");
-    const v = document.querySelector(`[data-ovv="${i}"]`); if (v) v.innerHTML = `<span class="ovw">${when}</span> ${p.read(m)}`;
+    const v = document.querySelector(`[data-ovv="${i}"]`); if (!v) return;
+    if (p.table) {
+      const t = p.table(m), st = S.data.obs?.station;
+      // highlight the highest and lowest model in the key column
+      const nums = t.rows.filter(r => r[0] !== "obs").map(r => parseFloat(String(r[t.hi] ?? "").replace(/[^0-9.\-]/g, ""))).filter(isFinite);
+      let mx = nums.length > 1 ? Math.max(...nums) : null, mn = nums.length > 1 ? Math.min(...nums) : null; if (mx === mn) mx = mn = null;
+      v.innerHTML = `<div class="ovtw"><span class="ovw">${when}</span></div><table class="ovt"><thead><tr><th></th>${t.head.map((h, j) => `<th class="${j + 1 === t.hi ? "k" : ""}">${esc(h)}</th>`).join("")}</tr></thead><tbody>${t.rows.map(r => {
+        const obs = r[0] === "obs", kv = parseFloat(String(r[t.hi] ?? "").replace(/[^0-9.\-]/g, ""));
+        return `<tr class="${obs ? "obs" : ""}"><th><i style="background:${obs ? "#fff" : colorOf(r[0])}"></i>${obs ? `Obs ${esc(st?.id || "")}` : esc(META(r[0]).short)}</th>${r.slice(1).map((c, j) => `<td class="${j + 1 === t.hi ? "k" : ""}${!obs && j + 1 === t.hi && mx != null && kv === mx ? " mx" : ""}${!obs && j + 1 === t.hi && mn != null && kv === mn ? " mn" : ""}">${c == null || c === false ? "–" : c}</td>`).join("")}</tr>`; }).join("")}</tbody></table>`;
+    } else v.innerHTML = `<span class="ovw">${when}</span> ${p.read(m)}`;
   });
 }
 // Computer: just moving the mouse moves the cursor on every chart and shows the tooltip

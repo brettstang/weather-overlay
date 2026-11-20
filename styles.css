@@ -603,3 +603,23 @@ body[data-tab="custom"] .tablecard, body[data-tab="custom"] #modelsBtn { display
 .ovpick .mchip.on { color: #fff; background: rgba(255,255,255,.08); }
 .lg-sep { width: 1px; height: 12px; background: var(--stroke-2); margin: 0 2px; }
 .ovleg svg { flex: none; }
+/* per-model value table in the overview headers (Compare mode) */
+.ovpanel:has(.ovt) .ovph { flex-direction: column; align-items: stretch; gap: 4px; }
+.ovpanel:has(.ovt) .ovv { text-align: left; }
+.ovtw { margin-bottom: 2px; }
+.ovt { border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; width: auto; }
+.ovt th, .ovt td { padding: 2px 10px 2px 0; text-align: right; white-space: nowrap; }
+.ovt thead th { font-size: 10.5px; color: var(--faint); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; padding-bottom: 3px; }
+.ovt thead th.k { color: var(--muted); }
+.ovt tbody th { text-align: left; font-weight: 600; color: #dfe4ff; padding-right: 14px; }
+.ovt tbody th i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+.ovt td { color: var(--muted); } .ovt td.k { color: #fff; font-weight: 700; }
+.ovt td.mx { color: #ffb38a; } .ovt td.mn { color: #8fd3ff; }
+.ovt td small { color: var(--faint); }
+.ovt td .pt { display: inline-block; width: 7px; height: 7px; border-radius: 2px; margin-left: 4px; vertical-align: 1px; }
+.ovt tr.obs th, .ovt tr.obs td { color: #fff; border-top: 1px solid var(--stroke); padding-top: 3px; }
+@media (min-width: 900px) {
+  /* on wide screens show the models side by side: one column per model */
+  .ovt { display: block; overflow-x: auto; }
+}
+@media (max-width: 680px) { .ovt { font-size: 12px; } .ovt th, .ovt td { padding-right: 8px; } }
