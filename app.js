@@ -814,6 +814,8 @@ function ovFrame(W, rows) {
   for (let h = 0; h * 60 <= span; h += every) { const m = h * 60; if (h % 24) for (const s of subs) g += `<line x1="${x(m)}" x2="${x(m)}" y1="${s.top}" y2="${s.bot}" stroke="rgba(255,255,255,.05)"/>`; }
   // Day labels: size them to the room each day gets, centred on the day so they never collide
   const perDay = (W - L - R) * 1440 / span;
+  // Month, once, in the left margin (the full-width labels already include it)
+  if (perDay < 150 && D.dates[todayIdx()]) g += `<text x="${L - 5}" y="${top0 - 6}" text-anchor="end" font-size="11" font-weight="700" fill="rgba(226,231,255,.75)">${MO[dObj(D.dates[todayIdx()]).getUTCMonth()]}</text>`;
   for (let d = 0; d * 1440 <= span; d++) {
     const m = d * 1440, di = todayIdx() + d;
     if (d) for (const s of subs) g += `<line x1="${x(m)}" x2="${x(m)}" y1="${s.top}" y2="${s.bot}" stroke="rgba(255,255,255,.2)"/>`;
@@ -821,10 +823,10 @@ function ovFrame(W, rows) {
     const dd = dObj(date), wd = dd.getUTCDay(), dn = dd.getUTCDate(), room = Math.min(perDay, x(Math.min(span, m + 1440)) - x(m));
     let t;
     if (room >= 150) t = `${d === 0 ? "Today" : WDL[wd]} <tspan font-weight="500" fill="rgba(226,231,255,.45)">${MO[dd.getUTCMonth()]} ${dn}</tspan>`;
-    else if (room >= 64) t = d === 0 ? "Today" : `${WD[wd]} ${dn}`;
-    else if (room >= 40) t = `${WD[wd].slice(0, 2)} ${dn}`;
-    else if (room >= 20) t = String(dn);
-    else t = d % 2 ? "" : String(dn);
+    else if (room >= 64) t = d === 0 ? "Today" : dn === 1 ? `${WD[wd]} ${MO[dd.getUTCMonth()]} 1` : `${WD[wd]} ${dn}`;
+    else if (room >= 40) t = dn === 1 && d ? `${MO[dd.getUTCMonth()]} 1` : `${WD[wd].slice(0, 2)} ${dn}`;
+    else if (room >= 20) t = dn === 1 && d ? `${MO[dd.getUTCMonth()]}` : String(dn);
+    else t = dn === 1 && d ? MO[dd.getUTCMonth()] : d % 2 ? "" : String(dn);
     if (!t) continue;
     const cx = room >= 150 ? x(m) + 4 : x(m) + room / 2;
     g += `<text x="${cx}" y="${top0 - 6}" ${room >= 150 ? "" : 'text-anchor="middle"'} font-size="${room >= 40 ? 11 : 10}" font-weight="700" fill="${d === 0 ? "#fff" : "rgba(226,231,255,.75)"}">${t}</text>`;
