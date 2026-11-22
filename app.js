@@ -997,12 +997,14 @@ const modelKey = (ids, col = colorOf) => ids.map(id => `<span class="lg-i"><i cl
 // Weather colours in Compare mode: each model gets its own shade of the parameter's colour
 const SHADES = {
   rain:  ["#4cc9f0", "#4c8dff", "#9fd8ff", "#2763d6", "#7ae0ff", "#6f7dff", "#b8ccff", "#1d9bd1"],
-  snow:  ["#ffffff", "#dbe6ff", "#bfd0f2", "#e9eef8", "#a9bde4", "#f4f7ff", "#cdd9ef", "#98add8"],
+  snow:  ["#ffffff", "#8fd3ff", "#c6b3ff", "#7fe6d6", "#ffc2e2", "#aab6cc", "#f2e48c", "#9fb0ff"],
   cloud: ["#ffffff", "#8fb0e0", "#d8c39e", "#6f7a94", "#c4aee6", "#9fcfc4", "#e3a99f", "#b9bcc6"],
   wind:  ["#3ee6a0", "#16a96b", "#a6f5cf", "#0d7f4f", "#6fdfac", "#d0ffe6", "#2cc285", "#58a37c"],
   press: ["#c9cde0", "#9aa0b8", "#e3e6f2", "#7c8299", "#b2b7cb", "#8a90a8", "#d6d9e6", "#6e748c"],
 };
 const CLOUD_DASH = ["", "7 3", "2 3", "9 3 2 3", "1 4", "14 4", "4 2", "3 6"];
+const SNOW_DASH = ["7 3", "2 3", "10 3 2 3", "1.5 4", "14 4", "4 2", "3 6", "6 2 1 2"];
+const snowDash = ids => id => SNOW_DASH[Math.max(0, ids.indexOf(id)) % 8];
 const cloudDash = ids => id => CLOUD_DASH[Math.max(0, ids.indexOf(id)) % 8];
 const shadeOf = (kind, ids) => id => SHADES[kind][Math.max(0, ids.indexOf(id)) % 8];
 const styleKey = items => items.map(([kind, label]) => `<span class="lg-i">${kind === "dot" ? `<i class="ld" style="background:#cfd6f5"></i>` : kind === "ring" ? `<i class="lr" style="border-color:#cfd6f5"></i>` : `<svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke="#cfd6f5" stroke-width="2" stroke-dasharray="${kind}"/></svg>`}${esc(label)}</span>`).join("");
@@ -1071,7 +1073,7 @@ function ovPrecipMulti(W) {
   const rc = shadeOf("rain", ids), sc = shadeOf("snow", ids), cc = shadeOf("cloud", ids);
   for (const id of ids) {
     g += `<path d="${ovPath(F, A[id], y2, p => cvP(p.v))}" fill="none" stroke="${rc(id)}" stroke-width="2"/>`;
-    if (anySnow && SA[id].length) g += `<path d="${ovPath(F, SA[id], y2, p => cvS(p.v))}" fill="none" stroke="${sc(id)}" stroke-width="1.6" stroke-dasharray="6 4"/>`;
+    if (anySnow && SA[id].length) g += `<path d="${ovPath(F, SA[id], y2, p => cvS(p.v))}" fill="none" stroke="${sc(id)}" stroke-width="2" stroke-dasharray="${snowDash(ids)(id)}" stroke-linecap="round"/>`;
   }
   g += `<text x="${F.L + 4}" y="${s1.top + 11}" font-size="9.5" font-weight="700" fill="rgba(226,231,255,.55)">${inch ? "in" : "mm"}/h (avg)</text><text x="${F.W - F.R - 4}" y="${s1.top + 11}" text-anchor="end" font-size="9.5" font-weight="700" fill="rgba(226,231,255,.7)">total ${inch ? "in" : "mm / cm"}</text>`;
   if (hasC) {
@@ -1082,7 +1084,7 @@ function ovPrecipMulti(W) {
   }
   const pu = precipU(), su = inch ? "in" : "cm";
   return { key: "precip", title: "Precipitation & cloud", F, svg: g,
-    legend: `<span class="lg-i lg-n">Total precip</span>` + modelKey(ids, rc) + (anySnow ? `<span class="lg-sep"></span><span class="lg-i lg-n">Total snow (dashed)</span>` + modelKey(ids, sc) : "") + (hasC ? `<span class="lg-sep"></span><span class="lg-i lg-n">Cloud</span>` + ids.map(id => `<span class="lg-i"><svg width="20" height="6"><line x1="0" y1="3" x2="20" y2="3" stroke="${cc(id)}" stroke-width="2" stroke-dasharray="${cloudDash(ids)(id)}" stroke-linecap="round"/></svg>${esc(META(id).short)}</span>`).join("") : "") + `<span class="lg-sep"></span>` + leg("bar", PT_COLOR.rain, "Avg rain /h") + leg("bar", PT_COLOR.snow, "snow") + leg("bar", PT_COLOR.mix, "mix"),
+    legend: `<span class="lg-i lg-n">Total precip</span>` + modelKey(ids, rc) + (anySnow ? `<span class="lg-sep"></span><span class="lg-i lg-n">Total snow</span>` + ids.map(id => `<span class="lg-i"><svg width="20" height="6"><line x1="0" y1="3" x2="20" y2="3" stroke="${sc(id)}" stroke-width="2" stroke-dasharray="${snowDash(ids)(id)}" stroke-linecap="round"/></svg>${esc(META(id).short)}</span>`).join("") : "") + (hasC ? `<span class="lg-sep"></span><span class="lg-i lg-n">Cloud</span>` + ids.map(id => `<span class="lg-i"><svg width="20" height="6"><line x1="0" y1="3" x2="20" y2="3" stroke="${cc(id)}" stroke-width="2" stroke-dasharray="${cloudDash(ids)(id)}" stroke-linecap="round"/></svg>${esc(META(id).short)}</span>`).join("") : "") + `<span class="lg-sep"></span>` + leg("bar", PT_COLOR.rain, "Avg rain /h") + leg("bar", PT_COLOR.snow, "snow") + leg("bar", PT_COLOR.mix, "mix"),
     col: rc,
     tip: m => ids.map(id => { const a = nearest(A[id], m); if (!a) return null; const p = nearest(P[id], m), c = nearest(C[id], m), sa = nearest(SA[id], m), ty = p ? ptype(id, p.k) : null;
         return [META(id).short, `${fv("precip", cvP(a.v), "hr")} ${pu}${p && p.v >= 0.05 ? ` · ${fv("precip", cvP(p.v), "hr")}/h${ty ? " " + PT_LABEL[ty].toLowerCase() : ""}` : ""}${sa && sa.v > 0.05 ? ` · snow ${fv("precip", cvS(sa.v), "snow")} ${su}` : ""}${c ? ` · ${Math.round(c.v)}%` : ""}`, rc(id)]; }),
