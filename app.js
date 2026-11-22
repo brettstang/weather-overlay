@@ -812,10 +812,22 @@ function ovFrame(W, rows) {
   let g = "";
   // vertical hour grid + day lines + day headers
   for (let h = 0; h * 60 <= span; h += every) { const m = h * 60; if (h % 24) for (const s of subs) g += `<line x1="${x(m)}" x2="${x(m)}" y1="${s.top}" y2="${s.bot}" stroke="rgba(255,255,255,.05)"/>`; }
+  // Day labels: size them to the room each day gets, centred on the day so they never collide
+  const perDay = (W - L - R) * 1440 / span;
   for (let d = 0; d * 1440 <= span; d++) {
     const m = d * 1440, di = todayIdx() + d;
     if (d) for (const s of subs) g += `<line x1="${x(m)}" x2="${x(m)}" y1="${s.top}" y2="${s.bot}" stroke="rgba(255,255,255,.2)"/>`;
-    if (D.dates[di] && m < span - 60) g += `<text x="${x(m) + 4}" y="${top0 - 6}" font-size="11" font-weight="700" fill="${d === 0 ? "#fff" : "rgba(226,231,255,.75)"}">${d === 0 ? "Today" : days <= 3.5 && !narrow ? WDL[dObj(D.dates[di]).getUTCDay()] : dayShort(D.dates[di])}${days <= 3.5 && !narrow ? ` <tspan font-weight="500" fill="rgba(226,231,255,.45)">${MO[dObj(D.dates[di]).getUTCMonth()]} ${dObj(D.dates[di]).getUTCDate()}</tspan>` : ""}</text>`;
+    const date = D.dates[di]; if (!date || m >= span - 30) continue;
+    const dd = dObj(date), wd = dd.getUTCDay(), dn = dd.getUTCDate(), room = Math.min(perDay, x(Math.min(span, m + 1440)) - x(m));
+    let t;
+    if (room >= 150) t = `${d === 0 ? "Today" : WDL[wd]} <tspan font-weight="500" fill="rgba(226,231,255,.45)">${MO[dd.getUTCMonth()]} ${dn}</tspan>`;
+    else if (room >= 64) t = d === 0 ? "Today" : `${WD[wd]} ${dn}`;
+    else if (room >= 40) t = `${WD[wd].slice(0, 2)} ${dn}`;
+    else if (room >= 20) t = String(dn);
+    else t = d % 2 ? "" : String(dn);
+    if (!t) continue;
+    const cx = room >= 150 ? x(m) + 4 : x(m) + room / 2;
+    g += `<text x="${cx}" y="${top0 - 6}" ${room >= 150 ? "" : 'text-anchor="middle"'} font-size="${room >= 40 ? 11 : 10}" font-weight="700" fill="${d === 0 ? "#fff" : "rgba(226,231,255,.75)"}">${t}</text>`;
   }
   const last = subs[subs.length - 1];
   for (let h = 0; h * 60 <= span; h += every) {
