@@ -979,7 +979,16 @@ function ovSer1(v, id) {           // one model's hourly series in the window, r
   for (let k = 0; k < D.mins.length; k++) { const m = D.mins[k] - ws; if (m >= 0 && m <= span && a[k] != null) out.push({ m, k, v: a[k] }); }
   return out;
 }
-const modelKey = ids => ids.map(id => `<span class="lg-i"><i class="ld" style="background:${colorOf(id)}"></i>${esc(META(id).short)}</span>`).join("");
+const modelKey = (ids, col = colorOf) => ids.map(id => `<span class="lg-i"><i class="ld" style="background:${col(id)}"></i>${esc(META(id).short)}</span>`).join("");
+// Weather colours in Compare mode: each model gets its own shade of the parameter's colour
+const SHADES = {
+  rain:  ["#4cc9f0", "#4c8dff", "#9fd8ff", "#2763d6", "#7ae0ff", "#6f7dff", "#b8ccff", "#1d9bd1"],
+  snow:  ["#ffffff", "#dbe6ff", "#bfd0f2", "#e9eef8", "#a9bde4", "#f4f7ff", "#cdd9ef", "#98add8"],
+  cloud: ["#e4e8f2", "#b9c0d4", "#8f98b2", "#6b7390", "#d0d5e2", "#a2a9bf", "#7c849e", "#5a6280"],
+  wind:  ["#3ee6a0", "#16a96b", "#a6f5cf", "#0d7f4f", "#6fdfac", "#d0ffe6", "#2cc285", "#58a37c"],
+  press: ["#c9cde0", "#9aa0b8", "#e3e6f2", "#7c8299", "#b2b7cb", "#8a90a8", "#d6d9e6", "#6e748c"],
+};
+const shadeOf = (kind, ids) => id => SHADES[kind][Math.max(0, ids.indexOf(id)) % 8];
 const styleKey = items => items.map(([kind, label]) => `<span class="lg-i">${kind === "dot" ? `<i class="ld" style="background:#cfd6f5"></i>` : kind === "ring" ? `<i class="lr" style="border-color:#cfd6f5"></i>` : `<svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke="#cfd6f5" stroke-width="2" stroke-dasharray="${kind}"/></svg>`}${esc(label)}</span>`).join("");
 const span2 = (a, f) => a.length ? `${f(Math.min(...a))}–${f(Math.max(...a))}` : "–";
 
@@ -1043,25 +1052,27 @@ function ovPrecipMulti(W) {
     const ty = Object.entries(c).sort((a, b) => b[1] - a[1])[0];
     g += `<rect x="${(F.x(p.m) - bw).toFixed(1)}" y="${y1(cvP(p.v)).toFixed(1)}" width="${bw.toFixed(1)}" height="${(s1.bot - y1(cvP(p.v))).toFixed(1)}" fill="${ty[1] ? PT_COLOR[ty[0]] : PT_COLOR.rain}" opacity=".4"/>`;
   }
+  const rc = shadeOf("rain", ids), sc = shadeOf("snow", ids), cc = shadeOf("cloud", ids);
   for (const id of ids) {
-    g += `<path d="${ovPath(F, A[id], y2, p => cvP(p.v))}" fill="none" stroke="${colorOf(id)}" stroke-width="2"/>`;
-    if (anySnow && SA[id].length) g += `<path d="${ovPath(F, SA[id], y2, p => cvS(p.v))}" fill="none" stroke="${colorOf(id)}" stroke-width="1.5" stroke-dasharray="6 4"/>`;
+    g += `<path d="${ovPath(F, A[id], y2, p => cvP(p.v))}" fill="none" stroke="${rc(id)}" stroke-width="2"/>`;
+    if (anySnow && SA[id].length) g += `<path d="${ovPath(F, SA[id], y2, p => cvS(p.v))}" fill="none" stroke="${sc(id)}" stroke-width="1.6" stroke-dasharray="6 4"/>`;
   }
   g += `<text x="${F.L + 4}" y="${s1.top + 11}" font-size="9.5" font-weight="700" fill="rgba(226,231,255,.55)">${inch ? "in" : "mm"}/h (avg)</text><text x="${F.W - F.R - 4}" y="${s1.top + 11}" text-anchor="end" font-size="9.5" font-weight="700" fill="rgba(226,231,255,.7)">total ${inch ? "in" : "mm / cm"}</text>`;
   if (hasC) {
     const s2 = F.subs[1], yc = ovScale(s2, 0, 100);
-    g += ovAxis(F, s2, 0, 100, 50, "l", v => v + "%") + ids.map(id => `<path d="${ovPath(F, C[id], yc)}" fill="none" stroke="${colorOf(id)}" stroke-width="1.3" opacity=".85"/>`).join("");
+    g += ovAxis(F, s2, 0, 100, 50, "l", v => v + "%") + `<path d="${ovArea(F, (() => { const out = []; for (const p of C[ids.find(id => C[id].length)] || []) { const vs = ids.map(id => S.data.raw.cloud_cover?.[id]?.[p.k]).filter(x => x != null); out.push({ m: p.m, v: mean(vs) }); } return out; })(), yc, s2.bot)}" fill="#9aa8d6" opacity=".18"/>` + ids.map(id => `<path d="${ovPath(F, C[id], yc)}" fill="none" stroke="${cc(id)}" stroke-width="1.3" opacity=".9"/>`).join("");
     g += `<text x="${F.L + 4}" y="${s2.top + 11}" font-size="9.5" font-weight="700" fill="rgba(226,231,255,.6)">Cloud</text>`;
   }
   const pu = precipU(), su = inch ? "in" : "cm";
   return { key: "precip", title: "Precipitation & cloud", F, svg: g,
-    legend: modelKey(ids) + `<span class="lg-sep"></span>` + styleKey([["", "Total precip"], ...(anySnow ? [["6 4", `Total snow (${su})`]] : [])]) + leg("bar", PT_COLOR.rain, "Avg rain /h") + leg("bar", PT_COLOR.snow, "snow") + leg("bar", PT_COLOR.mix, "mix") + (hasC ? `<span class="lg-i lg-n">lower strip = cloud %</span>` : ""),
+    legend: `<span class="lg-i lg-n">Total precip</span>` + modelKey(ids, rc) + (anySnow ? `<span class="lg-sep"></span><span class="lg-i lg-n">Total snow (dashed)</span>` + modelKey(ids, sc) : "") + (hasC ? `<span class="lg-sep"></span><span class="lg-i lg-n">Cloud</span>` + modelKey(ids, cc) : "") + `<span class="lg-sep"></span>` + leg("bar", PT_COLOR.rain, "Avg rain /h") + leg("bar", PT_COLOR.snow, "snow") + leg("bar", PT_COLOR.mix, "mix"),
+    col: rc,
     tip: m => ids.map(id => { const a = nearest(A[id], m); if (!a) return null; const p = nearest(P[id], m), c = nearest(C[id], m), sa = nearest(SA[id], m), ty = p ? ptype(id, p.k) : null;
-        return [META(id).short, `${fv("precip", cvP(a.v), "hr")} ${pu}${p && p.v >= 0.05 ? ` · ${fv("precip", cvP(p.v), "hr")}/h${ty ? " " + PT_LABEL[ty].toLowerCase() : ""}` : ""}${sa && sa.v > 0.05 ? ` · snow ${fv("precip", cvS(sa.v), "snow")} ${su}` : ""}${c ? ` · ${Math.round(c.v)}%` : ""}`, colorOf(id)]; }),
+        return [META(id).short, `${fv("precip", cvP(a.v), "hr")} ${pu}${p && p.v >= 0.05 ? ` · ${fv("precip", cvP(p.v), "hr")}/h${ty ? " " + PT_LABEL[ty].toLowerCase() : ""}` : ""}${sa && sa.v > 0.05 ? ` · snow ${fv("precip", cvS(sa.v), "snow")} ${su}` : ""}${c ? ` · ${Math.round(c.v)}%` : ""}`, rc(id)]; }),
     table: m => ({ head: [`1 hr`, `Total ${pu}`, ...(anySnow ? [`Snow ${su}`] : []), "Cloud"], rows: ids.map(id => { const p = nearest(P[id], m), a = nearest(A[id], m), sa = nearest(SA[id], m), c = nearest(C[id], m), ty = p ? ptype(id, p.k) : null;
         return [id, p && `${fv("precip", cvP(p.v), "hr")}${ty ? `<i class="pt" style="background:${PT_COLOR[ty]}" title="${PT_LABEL[ty]}"></i>` : ""}`, a && fv("precip", cvP(a.v), "hr"), ...(anySnow ? [sa ? fv("precip", cvS(sa.v), "snow") : "0"] : []), c && Math.round(c.v) + "%"]; }), hi: 2 }),
     read: m => { const t = ids.map(id => nearest(A[id], m)).filter(Boolean).map(p => cvP(p.v)); return `total so far <b class="c-p">${span2(t, v => fv("precip", v, "hr"))}</b> ${pu} across ${t.length} models`; },
-    dots: m => ids.map(id => { const a = nearest(A[id], m); return a && [a.m, y2(cvP(a.v)), colorOf(id)]; }).filter(Boolean) };
+    dots: m => ids.map(id => { const a = nearest(A[id], m); return a && [a.m, y2(cvP(a.v)), rc(id)]; }).filter(Boolean) };
 }
 function ovWindMulti(W) {
   const D = S.data, ids = ovPick().filter(id => D.raw.wind_speed_10m?.[id]); if (!ids.length) return null;
@@ -1072,29 +1083,31 @@ function ovWindMulti(W) {
   const mx = Math.max(20, ...ids.flatMap(id => [...Wd[id], ...Gu[id]].map(p => cvW(p.v))), ...[...oW, ...oG].map(p => cvW(p.v)));
   const st = niceStep(mx, 4), hi = Math.ceil(mx * 1.05 / st) * st, y = ovScale(s1, 0, hi);
   let g = F.g + ovAxis(F, s1, 0, hi, st, "l", v => Math.round(v));
+  const wc = shadeOf("wind", ids), pc = shadeOf("press", ids);
   const pv = ids.flatMap(id => Pr[id].map(p => p.v));
   if (pv.length) {
     const plo = Math.floor(Math.min(...pv) - 1), phi = Math.ceil(Math.max(...pv) + 1), pst = niceStep(phi - plo, 4), pl = Math.floor(plo / pst) * pst, ph = Math.ceil(phi / pst) * pst, yp = ovScale(s1, pl, ph);
-    g += ovAxis(F, s1, pl, ph, pst, "r", v => Math.round(v), "rgba(200,200,215,.7)", false) + ids.map(id => `<path d="${ovPath(F, Pr[id], yp)}" fill="none" stroke="${colorOf(id)}" stroke-width="1.1" stroke-dasharray="1.5 3" stroke-linecap="round" opacity=".7"/>`).join("");
+    g += ovAxis(F, s1, pl, ph, pst, "r", v => Math.round(v), "rgba(200,200,215,.7)", false) + ids.map(id => `<path d="${ovPath(F, Pr[id], yp)}" fill="none" stroke="${pc(id)}" stroke-width="1.2" stroke-dasharray="1.5 3" stroke-linecap="round" opacity=".75"/>`).join("");
     g += `<text x="${F.W - F.R - 4}" y="${s1.top + 11}" text-anchor="end" font-size="9.5" font-weight="700" fill="rgba(200,200,215,.7)">hPa</text>`;
   }
   const r = F.span <= 3.5 * 1440 ? 2.3 : 1.6;
-  for (const id of ids) g += Gu[id].map(p => `<circle cx="${F.x(p.m).toFixed(1)}" cy="${y(cvW(p.v)).toFixed(1)}" r="${r}" fill="${colorOf(id)}" opacity=".85"/>`).join("");
-  for (const id of ids) g += `<path d="${ovPath(F, Wd[id], y, p => cvW(p.v))}" fill="none" stroke="${colorOf(id)}" stroke-width="2"/>`;
+  for (const id of ids) g += Gu[id].map(p => `<circle cx="${F.x(p.m).toFixed(1)}" cy="${y(cvW(p.v)).toFixed(1)}" r="${r}" fill="${wc(id)}" opacity=".85"/>`).join("");
+  for (const id of ids) g += `<path d="${ovPath(F, Wd[id], y, p => cvW(p.v))}" fill="none" stroke="${wc(id)}" stroke-width="2"/>`;
   g += oW.map(p => `<circle cx="${F.x(p.m).toFixed(1)}" cy="${y(cvW(p.v)).toFixed(1)}" r="2.6" fill="#fff" stroke="#0a0e22" stroke-width="1"/>`).join("") + oG.map(p => `<circle cx="${F.x(p.m).toFixed(1)}" cy="${y(cvW(p.v)).toFixed(1)}" r="3.2" fill="none" stroke="#fff" stroke-width="1.4"/>`).join("");
   g += `<text x="${F.L + 4}" y="${s1.top + 11}" font-size="9.5" font-weight="700" fill="rgba(226,231,255,.6)">${esc(WIND_L[windU()])}</text>`;
   const wu = WIND_L[windU()], dirOf = (id, k) => { const d = D.raw.wind_direction_10m?.[id]?.[k]; return d == null ? "" : `${compass(d)} `; };
   return { key: "wind", title: "Wind & pressure", F, svg: g,
-    legend: modelKey(ids) + `<span class="lg-sep"></span>` + styleKey([["", "Wind"], ["dot", "Gusts"], ["1.5 3", "Pressure"]]) + (oW.length ? leg("dot", "#fff", `Observed ${st2.id}`) : ""),
+    legend: modelKey(ids, wc) + `<span class="lg-sep"></span>` + styleKey([["", "Wind"], ["dot", "Gusts"], ["1.5 3", "Pressure (greys)"]]) + (oW.length ? leg("dot", "#fff", `Observed ${st2.id}`) : ""),
+    col: wc,
     tip: m => [...ids.map(id => { const w = nearest(Wd[id], m); if (!w) return null; const gu = nearest(Gu[id], m), p = nearest(Pr[id], m);
-        return [META(id).short, `${dirOf(id, w.k)}${Math.round(cvW(w.v))}${gu ? ` G${Math.round(cvW(gu.v))}` : ""} ${wu}${p ? ` · ${p.v.toFixed(1)} hPa` : ""}`, colorOf(id)]; }),
+        return [META(id).short, `${dirOf(id, w.k)}${Math.round(cvW(w.v))}${gu ? ` G${Math.round(cvW(gu.v))}` : ""} ${wu}${p ? ` · ${p.v.toFixed(1)} hPa` : ""}`, wc(id)]; }),
         nearest(oW, m) && [`Observed ${st2.id}`, `${Math.round(cvW(nearest(oW, m).v))}${nearest(oG, m) ? ` G${Math.round(cvW(nearest(oG, m).v))}` : ""} ${wu}`, "#fff"]],
     table: m => ({ head: ["Dir", `Wind ${wu}`, "Gust", "hPa"], rows: [...ids.map(id => { const w = nearest(Wd[id], m), gu = nearest(Gu[id], m), p = nearest(Pr[id], m), d = w ? D.raw.wind_direction_10m?.[id]?.[w.k] : null;
         return [id, d != null ? `${compass(d)}<small> ${Math.round(d)}°</small>` : null, w && Math.round(cvW(w.v)), gu && Math.round(cvW(gu.v)), p && p.v.toFixed(1)]; }),
         ...(oW.length ? [["obs", null, nearest(oW, m) && Math.round(cvW(nearest(oW, m).v)), nearest(oG, m) && Math.round(cvW(nearest(oG, m).v)), null]] : [])], hi: 2 }),
     read: m => { const w = ids.map(id => nearest(Wd[id], m)).filter(Boolean).map(p => cvW(p.v)), gs = ids.map(id => nearest(Gu[id], m)).filter(Boolean).map(p => cvW(p.v));
       return `wind <b class="c-w">${span2(w, Math.round)}</b>${gs.length ? ` · gusts <b class="c-g">${span2(gs, Math.round)}</b>` : ""} ${esc(wu)}`; },
-    dots: m => ids.map(id => { const w = nearest(Wd[id], m); return w && [w.m, y(cvW(w.v)), colorOf(id)]; }).filter(Boolean) };
+    dots: m => ids.map(id => { const w = nearest(Wd[id], m); return w && [w.m, y(cvW(w.v)), wc(id)]; }).filter(Boolean) };
 }
 function ovStormMulti(W) {
   const D = S.data, ids = ovPick(), C = {}, H = {};
@@ -1189,7 +1202,7 @@ function ovCursor(m) {
       let mx = nums.length > 1 ? Math.max(...nums) : null, mn = nums.length > 1 ? Math.min(...nums) : null; if (mx === mn) mx = mn = null;
       v.innerHTML = `<div class="ovtw"><span class="ovw">${when}</span></div><table class="ovt"><thead><tr><th></th>${t.head.map((h, j) => `<th class="${j + 1 === t.hi ? "k" : ""}">${esc(h)}</th>`).join("")}</tr></thead><tbody>${t.rows.map(r => {
         const obs = r[0] === "obs", kv = parseFloat(String(r[t.hi] ?? "").replace(/[^0-9.\-]/g, ""));
-        return `<tr class="${obs ? "obs" : ""}"><th><i style="background:${obs ? "#fff" : colorOf(r[0])}"></i>${obs ? `Obs ${esc(st?.id || "")}` : esc(META(r[0]).short)}</th>${r.slice(1).map((c, j) => `<td class="${j + 1 === t.hi ? "k" : ""}${!obs && j + 1 === t.hi && mx != null && kv === mx ? " mx" : ""}${!obs && j + 1 === t.hi && mn != null && kv === mn ? " mn" : ""}">${c == null || c === false ? "–" : c}</td>`).join("")}</tr>`; }).join("")}</tbody></table>`;
+        return `<tr class="${obs ? "obs" : ""}"><th><i style="background:${obs ? "#fff" : (p.col || colorOf)(r[0])}"></i>${obs ? `Obs ${esc(st?.id || "")}` : esc(META(r[0]).short)}</th>${r.slice(1).map((c, j) => `<td class="${j + 1 === t.hi ? "k" : ""}${!obs && j + 1 === t.hi && mx != null && kv === mx ? " mx" : ""}${!obs && j + 1 === t.hi && mn != null && kv === mn ? " mn" : ""}">${c == null || c === false ? "–" : c}</td>`).join("")}</tr>`; }).join("")}</tbody></table>`;
     } else v.innerHTML = `<span class="ovw">${when}</span> ${p.read(m)}`;
   });
 }
