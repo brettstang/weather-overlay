@@ -998,10 +998,12 @@ const modelKey = (ids, col = colorOf) => ids.map(id => `<span class="lg-i"><i cl
 const SHADES = {
   rain:  ["#4cc9f0", "#4c8dff", "#9fd8ff", "#2763d6", "#7ae0ff", "#6f7dff", "#b8ccff", "#1d9bd1"],
   snow:  ["#ffffff", "#dbe6ff", "#bfd0f2", "#e9eef8", "#a9bde4", "#f4f7ff", "#cdd9ef", "#98add8"],
-  cloud: ["#e4e8f2", "#b9c0d4", "#8f98b2", "#6b7390", "#d0d5e2", "#a2a9bf", "#7c849e", "#5a6280"],
+  cloud: ["#ffffff", "#8fb0e0", "#d8c39e", "#6f7a94", "#c4aee6", "#9fcfc4", "#e3a99f", "#b9bcc6"],
   wind:  ["#3ee6a0", "#16a96b", "#a6f5cf", "#0d7f4f", "#6fdfac", "#d0ffe6", "#2cc285", "#58a37c"],
   press: ["#c9cde0", "#9aa0b8", "#e3e6f2", "#7c8299", "#b2b7cb", "#8a90a8", "#d6d9e6", "#6e748c"],
 };
+const CLOUD_DASH = ["", "7 3", "2 3", "9 3 2 3", "1 4", "14 4", "4 2", "3 6"];
+const cloudDash = ids => id => CLOUD_DASH[Math.max(0, ids.indexOf(id)) % 8];
 const shadeOf = (kind, ids) => id => SHADES[kind][Math.max(0, ids.indexOf(id)) % 8];
 const styleKey = items => items.map(([kind, label]) => `<span class="lg-i">${kind === "dot" ? `<i class="ld" style="background:#cfd6f5"></i>` : kind === "ring" ? `<i class="lr" style="border-color:#cfd6f5"></i>` : `<svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke="#cfd6f5" stroke-width="2" stroke-dasharray="${kind}"/></svg>`}${esc(label)}</span>`).join("");
 const span2 = (a, f) => a.length ? `${f(Math.min(...a))}–${f(Math.max(...a))}` : "–";
@@ -1052,7 +1054,7 @@ function ovPrecipMulti(W) {
     maxAcc = Math.max(maxAcc, cvP(a), cvS(s)); if (s > 0.05) anySnow = true;
   }
   const hasC = ids.some(id => C[id].length);
-  const F = ovFrame(W, [{ h: W < 560 ? 120 : 140 }, ...(hasC ? [{ h: 56 }] : [])]), s1 = F.subs[0];
+  const F = ovFrame(W, [{ h: W < 560 ? 120 : 140 }, ...(hasC ? [{ h: W < 560 ? 80 : 90 }] : [])]), s1 = F.subs[0];
   // hourly bars = average of the compared models, coloured by type
   const avg = []; for (const p of P[ids[0]] || []) { const vs = ids.map(id => S.data.raw.precipitation[id]?.[p.k]).filter(x => x != null); avg.push({ m: p.m, k: p.k, v: mean(vs) }); }
   const maxBar = Math.max(...avg.map(p => cvP(p.v)), inch ? 0.04 : 1);
@@ -1074,12 +1076,13 @@ function ovPrecipMulti(W) {
   g += `<text x="${F.L + 4}" y="${s1.top + 11}" font-size="9.5" font-weight="700" fill="rgba(226,231,255,.55)">${inch ? "in" : "mm"}/h (avg)</text><text x="${F.W - F.R - 4}" y="${s1.top + 11}" text-anchor="end" font-size="9.5" font-weight="700" fill="rgba(226,231,255,.7)">total ${inch ? "in" : "mm / cm"}</text>`;
   if (hasC) {
     const s2 = F.subs[1], yc = ovScale(s2, 0, 100);
-    g += ovAxis(F, s2, 0, 100, 50, "l", v => v + "%") + `<path d="${ovArea(F, (() => { const out = []; for (const p of C[ids.find(id => C[id].length)] || []) { const vs = ids.map(id => S.data.raw.cloud_cover?.[id]?.[p.k]).filter(x => x != null); out.push({ m: p.m, v: mean(vs) }); } return out; })(), yc, s2.bot)}" fill="#9aa8d6" opacity=".18"/>` + ids.map(id => `<path d="${ovPath(F, C[id], yc)}" fill="none" stroke="${cc(id)}" stroke-width="1.3" opacity=".9"/>`).join("");
+    const cd = cloudDash(ids);
+    g += ovAxis(F, s2, 0, 100, 50, "l", v => v + "%") + ids.map(id => `<path d="${ovPath(F, C[id], yc)}" fill="none" stroke="${cc(id)}" stroke-width="1.6" stroke-dasharray="${cd(id)}" stroke-linecap="round" opacity=".95"/>`).join("");
     g += `<text x="${F.L + 4}" y="${s2.top + 11}" font-size="9.5" font-weight="700" fill="rgba(226,231,255,.6)">Cloud</text>`;
   }
   const pu = precipU(), su = inch ? "in" : "cm";
   return { key: "precip", title: "Precipitation & cloud", F, svg: g,
-    legend: `<span class="lg-i lg-n">Total precip</span>` + modelKey(ids, rc) + (anySnow ? `<span class="lg-sep"></span><span class="lg-i lg-n">Total snow (dashed)</span>` + modelKey(ids, sc) : "") + (hasC ? `<span class="lg-sep"></span><span class="lg-i lg-n">Cloud</span>` + modelKey(ids, cc) : "") + `<span class="lg-sep"></span>` + leg("bar", PT_COLOR.rain, "Avg rain /h") + leg("bar", PT_COLOR.snow, "snow") + leg("bar", PT_COLOR.mix, "mix"),
+    legend: `<span class="lg-i lg-n">Total precip</span>` + modelKey(ids, rc) + (anySnow ? `<span class="lg-sep"></span><span class="lg-i lg-n">Total snow (dashed)</span>` + modelKey(ids, sc) : "") + (hasC ? `<span class="lg-sep"></span><span class="lg-i lg-n">Cloud</span>` + ids.map(id => `<span class="lg-i"><svg width="20" height="6"><line x1="0" y1="3" x2="20" y2="3" stroke="${cc(id)}" stroke-width="2" stroke-dasharray="${cloudDash(ids)(id)}" stroke-linecap="round"/></svg>${esc(META(id).short)}</span>`).join("") : "") + `<span class="lg-sep"></span>` + leg("bar", PT_COLOR.rain, "Avg rain /h") + leg("bar", PT_COLOR.snow, "snow") + leg("bar", PT_COLOR.mix, "mix"),
     col: rc,
     tip: m => ids.map(id => { const a = nearest(A[id], m); if (!a) return null; const p = nearest(P[id], m), c = nearest(C[id], m), sa = nearest(SA[id], m), ty = p ? ptype(id, p.k) : null;
         return [META(id).short, `${fv("precip", cvP(a.v), "hr")} ${pu}${p && p.v >= 0.05 ? ` · ${fv("precip", cvP(p.v), "hr")}/h${ty ? " " + PT_LABEL[ty].toLowerCase() : ""}` : ""}${sa && sa.v > 0.05 ? ` · snow ${fv("precip", cvS(sa.v), "snow")} ${su}` : ""}${c ? ` · ${Math.round(c.v)}%` : ""}`, rc(id)]; }),
