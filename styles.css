@@ -623,3 +623,8 @@ body[data-tab="custom"] .tablecard, body[data-tab="custom"] #modelsBtn { display
   .ovt { display: block; overflow-x: auto; }
 }
 @media (max-width: 680px) { .ovt { font-size: 12px; } .ovt th, .ovt td { padding-right: 8px; } }
+/* v7: sleek monochrome-blue logo */
+.logo { width: 32px; height: 32px; border-radius: 9px; background: none; box-shadow: none; }
+.logo svg { width: 32px; height: 32px; display: block; }
+.wordmark { font-weight: 500; letter-spacing: -.4px; }
+.wordmark b { font-weight: 800; color: #8fb0ff; }
