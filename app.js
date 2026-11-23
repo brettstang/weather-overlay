@@ -788,12 +788,20 @@ function ovWin() {
   const D = S.data, ws = todayIdx() * 1440, last = D.mins[D.mins.length - 1];
   return { ws, span: Math.min((S.ovRange + 1) * 1440, last - ws) };
 }
+// Zoom: the visible part of the window, in minutes from the window start
+function ovView() {
+  const { span } = ovWin(), z = S.ovZ;
+  if (!z) return { a: 0, b: span };
+  const a = Math.max(0, Math.min(z.a, span - 180)), b = Math.min(span, Math.max(z.b, a + 180));
+  return { a, b };
+}
+const ovVis = arr => { const { a, b } = ovView(); return arr.filter(p => p.m >= a && p.m <= b); };
 // Hour-by-hour value (average across the source models) inside the window, raw units
-function ovSeries(v) {
-  const D = S.data, ids = ovIds(v), { ws, span } = ovWin(), out = [];
+function ovSeries(v, full) {
+  const D = S.data, ids = ovIds(v), { ws, span } = ovWin(), { a, b } = full ? { a: 0, b: span } : ovView(), out = [];
   if (!ids.length) return out;
   for (let k = 0; k < D.mins.length; k++) {
-    const m = D.mins[k] - ws; if (m < 0 || m > span) continue;
+    const m = D.mins[k] - ws; if (m < a || m > b) continue;
     const vals = []; for (const id of ids) { const x = D.raw[v][id]?.[k]; if (x != null) vals.push(x); }
     if (vals.length) out.push({ m, k, v: mean(vals), lo: Math.min(...vals), hi: Math.max(...vals), n: vals.length });
   }
@@ -801,49 +809,52 @@ function ovSeries(v) {
 }
 function ovObs(field) {
   const D = S.data; if (!D.obs?.pts.length) return [];
-  const { ws, span } = ovWin();
-  return D.obs.pts.filter(p => p.m >= ws && p.m <= ws + span && p[field] != null).map(p => ({ m: p.m - ws, v: p[field] }));
+  const { ws } = ovWin(), { a, b } = ovView();
+  return D.obs.pts.filter(p => p.m >= ws + a && p.m <= ws + b && p[field] != null).map(p => ({ m: p.m - ws, v: p[field] }));
 }
 // Shared chart frame for one panel: day headers, time grid, now shading, axes
 function ovFrame(W, rows) {
   const narrow = W < 560, L = narrow ? 36 : 46, R = narrow ? 38 : 50, top0 = 20, xlab = 20, gap = 10;
-  const { ws, span } = ovWin(), D = S.data;
+  const { ws, span: full } = ovWin(), { a, b } = ovView(), span = b - a, D = S.data;
   let y = top0; const subs = rows.map(r => { const s = { ...r, top: y, bot: y + r.h }; y += r.h + gap; return s; });
   const H = y - gap + xlab;
-  const x = m => L + (m / span) * (W - L - R);
-  const days = span / 1440;
-  const every = days <= 2.5 ? (narrow ? 12 : 6) : days <= 3.5 ? (narrow ? 12 : 6) : days <= 7.5 ? 12 : 24;
+  const x = m => L + ((m - a) / span) * (W - L - R);
+  const days = span / 1440, pxH = (W - L - R) / (span / 60);
+  const every = [1, 2, 3, 6, 12, 24].find(h => h * pxH >= (narrow ? 34 : 30)) || 24;
   let g = "";
-  // vertical hour grid + day lines + day headers
-  for (let h = 0; h * 60 <= span; h += every) { const m = h * 60; if (h % 24) for (const s of subs) g += `<line x1="${x(m)}" x2="${x(m)}" y1="${s.top}" y2="${s.bot}" stroke="rgba(255,255,255,.05)"/>`; }
-  // Day labels: size them to the room each day gets, centred on the day so they never collide
-  const perDay = (W - L - R) * 1440 / span;
-  // Month, once, in the left margin (the full-width labels already include it)
-  if (perDay < 150 && D.dates[todayIdx()]) g += `<text x="${L - 5}" y="${top0 - 6}" text-anchor="end" font-size="11" font-weight="700" fill="rgba(226,231,255,.75)">${MO[dObj(D.dates[todayIdx()]).getUTCMonth()]}</text>`;
-  for (let d = 0; d * 1440 <= span; d++) {
-    const m = d * 1440, di = todayIdx() + d;
-    if (d) for (const s of subs) g += `<line x1="${x(m)}" x2="${x(m)}" y1="${s.top}" y2="${s.bot}" stroke="rgba(255,255,255,.2)"/>`;
-    const date = D.dates[di]; if (!date || m >= span - 30) continue;
-    const dd = dObj(date), wd = dd.getUTCDay(), dn = dd.getUTCDate(), room = Math.min(perDay, x(Math.min(span, m + 1440)) - x(m));
+  // vertical hour grid + labels
+  const last = subs[subs.length - 1];
+  for (let h = Math.ceil(a / 60 / every) * every; h * 60 <= b; h += every) {
+    const m = h * 60, hh = h % 24;
+    if (hh) for (const s of subs) g += `<line x1="${x(m)}" x2="${x(m)}" y1="${s.top}" y2="${s.bot}" stroke="rgba(255,255,255,.05)"/>`;
+    const t = every >= 24 ? "" : hh === 0 ? "12a" : hh === 12 ? "12p" : hh < 12 ? `${hh}a` : `${hh - 12}p`;
+    if (t) g += `<text x="${x(m)}" y="${last.bot + 15}" text-anchor="middle" font-size="10.5" fill="rgba(226,231,255,.5)">${t}</text>`;
+  }
+  // Day lines + labels sized to the room each (visible part of a) day gets
+  const d0 = Math.floor(a / 1440), d1 = Math.floor((b - 1) / 1440);
+  const firstDate = D.dates[todayIdx() + d0];
+  if (firstDate) g += `<text x="${L - 5}" y="${top0 - 6}" text-anchor="end" font-size="11" font-weight="700" fill="rgba(226,231,255,.75)">${MO[dObj(firstDate).getUTCMonth()]}</text>`;
+  for (let d = d0; d <= d1; d++) {
+    const m0 = d * 1440, di = todayIdx() + d, sa = Math.max(a, m0), sb = Math.min(b, m0 + 1440);
+    if (m0 > a) for (const s of subs) g += `<line x1="${x(m0)}" x2="${x(m0)}" y1="${s.top}" y2="${s.bot}" stroke="rgba(255,255,255,.2)"/>`;
+    const date = D.dates[di]; if (!date) continue;
+    const dd = dObj(date), wd = dd.getUTCDay(), dn = dd.getUTCDate(), room = x(sb) - x(sa);
     let t;
     if (room >= 150) t = `${d === 0 ? "Today" : WDL[wd]} <tspan font-weight="500" fill="rgba(226,231,255,.45)">${MO[dd.getUTCMonth()]} ${dn}</tspan>`;
     else if (room >= 64) t = d === 0 ? "Today" : dn === 1 ? `${WD[wd]} ${MO[dd.getUTCMonth()]} 1` : `${WD[wd]} ${dn}`;
     else if (room >= 40) t = dn === 1 && d ? `${MO[dd.getUTCMonth()]} 1` : `${WD[wd].slice(0, 2)} ${dn}`;
     else if (room >= 20) t = dn === 1 && d ? `${MO[dd.getUTCMonth()]}` : String(dn);
-    else t = dn === 1 && d ? MO[dd.getUTCMonth()] : d % 2 ? "" : String(dn);
+    else t = room < 12 ? "" : dn === 1 && d ? MO[dd.getUTCMonth()] : d % 2 ? "" : String(dn);
     if (!t) continue;
-    const cx = room >= 150 ? x(m) + 4 : x(m) + room / 2;
+    const cx = room >= 150 ? x(sa) + 4 : x(sa) + room / 2;
     g += `<text x="${cx}" y="${top0 - 6}" ${room >= 150 ? "" : 'text-anchor="middle"'} font-size="${room >= 40 ? 11 : 10}" font-weight="700" fill="${d === 0 ? "#fff" : "rgba(226,231,255,.75)"}">${t}</text>`;
   }
-  const last = subs[subs.length - 1];
-  for (let h = 0; h * 60 <= span; h += every) {
-    const hh = h % 24, t = every >= 24 ? "" : hh === 0 ? "12a" : hh === 12 ? "12p" : hh < 12 ? `${hh}a` : `${hh - 12}p`;
-    if (t) g += `<text x="${x(h * 60)}" y="${last.bot + 15}" text-anchor="middle" font-size="10.5" fill="rgba(226,231,255,.5)">${t}</text>`;
-  }
-  const nm = nowMin() - ws;
-  if (nm > 0 && nm < span) for (const s of subs) g += `<rect x="${L}" y="${s.top}" width="${x(nm) - L}" height="${s.h}" fill="rgba(255,255,255,.035)"/><line x1="${x(nm)}" x2="${x(nm)}" y1="${s.top}" y2="${s.bot}" stroke="rgba(255,255,255,.4)" stroke-dasharray="2 3"/>`;
+  // past shading + now line
+  const nm = nowMin() - ws, pe = Math.min(nm, b);
+  if (pe > a) for (const s of subs) g += `<rect x="${L}" y="${s.top}" width="${x(pe) - L}" height="${s.h}" fill="rgba(255,255,255,.035)"/>`;
+  if (nm > a && nm < b) for (const s of subs) g += `<line x1="${x(nm)}" x2="${x(nm)}" y1="${s.top}" y2="${s.bot}" stroke="rgba(255,255,255,.4)" stroke-dasharray="2 3"/>`;
   for (const s of subs) g += `<rect x="${L}" y="${s.top}" width="${W - L - R}" height="${s.h}" fill="none" stroke="rgba(255,255,255,.08)"/>`;
-  return { W, H, L, R, x, span, subs, g, narrow };
+  return { W, H, L, R, x, span, a, b, full, subs, g, narrow };
 }
 function ovScale(s, lo, hi) { return v => s.top + (1 - (v - lo) / (hi - lo || 1)) * (s.bot - s.top); }
 function ovAxis(F, s, lo, hi, step, side, fmtv, color = "rgba(226,231,255,.55)", grid = side === "l") {
@@ -892,13 +903,13 @@ function ovTempPanel(W) {
     dots: m => { const t = nearest(T, m); return t ? [[t.m, y(cvT(t.v)), "#ff6b6b"]] : []; } };
 }
 function ovPrecipPanel(W) {
-  const P = ovSeries("precipitation"), Sn = ovSeries("snowfall"), C = ovSeries("cloud_cover");
+  const Pf = ovSeries("precipitation", true), Sn = ovSeries("snowfall", true), C = ovSeries("cloud_cover"), P = ovVis(Pf);
   if (!P.length) return null;
   const F = ovFrame(W, [{ h: W < 560 ? 110 : 130 }, ...(C.length ? [{ h: 56 }] : [])]);
   const s1 = F.subs[0], ids = ovIds("precipitation"), inch = precipU() === "in";
   // accumulation (liquid) and snow total
-  let acc = 0, sacc = 0; const A = P.map(p => ({ m: p.m, v: (acc += p.v) }));
-  const SA = Sn.map(p => ({ m: p.m, v: (sacc += p.v) }));
+  let acc = 0, sacc = 0; const A = ovVis(Pf.map(p => ({ m: p.m, v: (acc += p.v) })));
+  const SA = ovVis(Sn.map(p => ({ m: p.m, v: (sacc += p.v) }))); acc = A.length ? A[A.length - 1].v : 0; sacc = SA.length ? SA[SA.length - 1].v : 0;
   const maxBar = Math.max(...P.map(p => cvP(p.v)), inch ? 0.04 : 1), maxAcc = Math.max(cvP(acc), cvS(sacc), inch ? 0.2 : 5);
   const st1 = niceStep(maxBar, 3), hi1 = Math.ceil(maxBar / st1) * st1, st2 = niceStep(maxAcc, 3), hi2 = Math.ceil(maxAcc * 1.05 / st2) * st2;
   const y1 = ovScale(s1, 0, hi1), y2 = ovScale(s1, 0, hi2), dec = st => st < 0.1 ? 2 : st < 1 ? 1 : 0;
@@ -1004,10 +1015,10 @@ function ovColorMap(ids) {
 }
 const ovMulti = () => S.ovModel === "multi";
 function ovPick() { const ok = new Set(avail("temperature_2m")); return S.ovModels.filter(id => ok.has(id)).slice(0, OV_MAX); }
-function ovSer1(v, id) {           // one model's hourly series in the window, raw units
-  const D = S.data, a = D.raw[v]?.[id], { ws, span } = ovWin(), out = [];
-  if (!a) return out;
-  for (let k = 0; k < D.mins.length; k++) { const m = D.mins[k] - ws; if (m >= 0 && m <= span && a[k] != null) out.push({ m, k, v: a[k] }); }
+function ovSer1(v, id, full) {     // one model's hourly series in the window (or the zoomed part), raw units
+  const D = S.data, arr = D.raw[v]?.[id], { ws, span } = ovWin(), { a, b } = full ? { a: 0, b: span } : ovView(), out = [];
+  if (!arr) return out;
+  for (let k = 0; k < D.mins.length; k++) { const m = D.mins[k] - ws; if (m >= a && m <= b && arr[k] != null) out.push({ m, k, v: arr[k] }); }
   return out;
 }
 const modelKey = (ids, col = colorOf) => ids.map(id => `<span class="lg-i"><i class="ld" style="background:${col(id)}"></i>${esc(META(id).short)}</span>`).join("");
@@ -1076,9 +1087,9 @@ function ovPrecipMulti(W) {
   const inch = precipU() === "in", P = {}, A = {}, SA = {}, C = {};
   let maxAcc = inch ? 0.2 : 5, anySnow = false;
   for (const id of ids) {
-    P[id] = ovSer1("precipitation", id); C[id] = ovSer1("cloud_cover", id);
-    let a = 0; A[id] = P[id].map(p => ({ m: p.m, k: p.k, v: (a += p.v) }));
-    let s = 0; SA[id] = ovSer1("snowfall", id).map(p => ({ m: p.m, v: (s += p.v) }));
+    const pf = ovSer1("precipitation", id, true); P[id] = ovVis(pf); C[id] = ovSer1("cloud_cover", id);
+    let a = 0; A[id] = ovVis(pf.map(p => ({ m: p.m, k: p.k, v: (a += p.v) }))); a = A[id].length ? A[id][A[id].length - 1].v : 0;
+    let s = 0; SA[id] = ovVis(ovSer1("snowfall", id, true).map(p => ({ m: p.m, v: (s += p.v) }))); s = SA[id].length ? SA[id][SA[id].length - 1].v : 0;
     maxAcc = Math.max(maxAcc, cvP(a), cvS(s)); if (s > 0.05) anySnow = true;
   }
   const hasC = ids.some(id => C[id].length);
@@ -1192,9 +1203,10 @@ function renderOverview() {
   const head = `<div class="ovbar">
       <label class="ovsel"><span>Source</span><select id="ovSrc">${opts}</select></label>
       <div class="seg" id="ovRange">${OV_RANGES.map(r => `<button data-ovr="${r}" class="${S.ovRange === r ? "on" : ""}">${r}D</button>`).join("")}</div>
+      <div class="seg ovzoom" role="group" aria-label="Zoom"><button data-ovz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button><button data-ovz="in" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>${S.ovZ ? `<button data-ovz="reset">Reset</button>` : ""}</div>
       ${st ? `<button class="chip${S.ovObs ? " on" : ""}" data-ovobs aria-pressed="${!!S.ovObs}"><i class="ld" style="background:#fff"></i>Observed ${esc(st.id)}</button>` : ""}
       ${src.single || src.multi ? "" : `<button class="linkbtn" data-open-models>Change models</button>`}
-    </div>${src.multi ? ovPicker() : ""}`;
+    </div>${S.ovZ ? ovNavBar() : ""}${src.multi ? ovPicker() : ""}`;
   const W2 = W - 2;
   OVP = (src.multi ? [ovTempMulti(W2), ovPrecipMulti(W2), ovWindMulti(W2), ovStormMulti(W2)] : [ovTempPanel(W2), ovPrecipPanel(W2), ovWindPanel(W2), ovStormPanel(W2)]).filter(Boolean);
   host.innerHTML = head + OVP.map((p, i) => `<section class="card ovpanel" data-ovi="${i}">
@@ -1203,6 +1215,7 @@ function renderOverview() {
       <div class="ovleg">${p.legend}${p.note ? `<span class="lg-n">${esc(p.note)}</span>` : ""}</div></section>`).join("") +
     `<div class="ovfoot">${esc(src.label)} · ${src.multi ? "colour = model, line style = parameter" : src.single ? "single model" : "shaded = range across models"} · ${matchMedia("(pointer: fine)").matches ? "hover" : "drag across"} any chart to read values</div>`;
   ovCursor(S.ovMin ?? Math.max(0, Math.round((nowMin() - ovWin().ws) / 60) * 60));
+  const hint = host.querySelector(".ovfoot"); if (hint && !S.ovZ) hint.insertAdjacentHTML("beforeend", ` · ${matchMedia("(pointer: fine)").matches ? "drag across a chart to zoom" : "pinch a chart to zoom"}`);
   // Load helicity when the storm panel scrolls into view
   if (!D.srhState && "IntersectionObserver" in window) {
     const el = host.querySelector('[data-ovi="3"]') || host.lastElementChild;
@@ -1227,6 +1240,13 @@ function ovTip(i, m, ev) {
   tip.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
 }
 function ovHideTips() { document.querySelectorAll(".ovtip").forEach(t => t.hidden = true); }
+function ovNavBar() {
+  const { span, ws } = ovWin(), { a, b } = ovView(), D = S.data;
+  const lab = m => { const abs = ws + m, di = Math.min(D.dates.length - 1, Math.floor(abs / 1440)); return `${dayShort(D.dates[di])} ${pad(Math.floor(abs / 60) % 24)}:00`; };
+  let ticks = ""; for (let d = 1; d * 1440 < span; d++) ticks += `<i style="left:${(d * 1440 / span * 100).toFixed(2)}%"></i>`;
+  return `<div class="ovnavw"><div class="ovnav" title="Drag to move the zoomed period">${ticks}<div class="ovthumb" style="left:${(a / span * 100).toFixed(2)}%;width:${((b - a) / span * 100).toFixed(2)}%"></div></div>
+    <div class="ovnavl"><span>Zoomed: <b>${lab(a)}</b> – <b>${lab(b)}</b></span><span class="ovnavh">${matchMedia("(pointer: fine)").matches ? "drag a chart to zoom · double-click to reset" : "pinch a chart to zoom · drag the bar to move"}</span></div></div>`;
+}
 function ovPicker() {
   const all = avail("temperature_2m"), sel = ovPick(), open = S.ovOpen || all.length <= 10, mc = ovColorMap(sel);
   return `<div class="card ovpick"><div class="bh"><b>Models to compare</b><small>${sel.length}/${OV_MAX} · colour = model</small></div><div class="bchips">${
@@ -1234,7 +1254,7 @@ function ovPicker() {
   }${all.length > 10 ? `<button class="mchip more" data-ovopen>${S.ovOpen ? "Done" : `+ Add models <small>${all.length - sel.length} more</small>`}</button>` : ""}</div></div>`;
 }
 function ovCursor(m) {
-  const { span } = ovWin(); m = Math.max(0, Math.min(span, m)); S.ovMin = m;
+  const { a, b } = ovView(); m = Math.max(a, Math.min(b, m)); S.ovMin = m;
   const D = S.data, ws = ovWin().ws, abs = ws + m, di = Math.min(D.dates.length - 1, Math.floor(abs / 1440));
   const when = `${dayShort(D.dates[di])} ${pad(Math.floor(abs / 60) % 24)}:00`;
   OVP.forEach((p, i) => {
@@ -1254,9 +1274,39 @@ function ovCursor(m) {
   });
 }
 // Computer: just moving the mouse moves the cursor on every chart and shows the tooltip
-function ovAt(svg, p, ev) { const r = svg.getBoundingClientRect(), sx = (ev.clientX - r.left) / r.width * p.F.W; return Math.max(0, Math.min(p.F.span, Math.round(((sx - p.F.L) / (p.F.W - p.F.L - p.F.R)) * p.F.span / 60) * 60)); }
+function ovAtRaw(svg, p, x) { const r = svg.getBoundingClientRect(), sx = (x - r.left) / r.width * p.F.W; return p.F.a + ((sx - p.F.L) / (p.F.W - p.F.L - p.F.R)) * p.F.span; }
+function ovAt(svg, p, ev) { return Math.max(p.F.a, Math.min(p.F.b, Math.round(ovAtRaw(svg, p, ev.clientX) / 60) * 60)); }
+// ---------- Overview zoom ----------
+let ovRaf = 0;
+function ovZoomTo(a, b, now) {
+  if (!isFinite(a) || !isFinite(b)) return;
+  const { span } = ovWin();
+  let w = Math.max(180, b - a); if (w >= span * 0.985) { S.ovZ = null; } else {
+    a = Math.max(0, Math.min(a, span - w)); S.ovZ = { a: Math.round(a / 60) * 60, b: Math.round((a + w) / 60) * 60 };
+  }
+  if (now) renderOverview(); else { cancelAnimationFrame(ovRaf); ovRaf = requestAnimationFrame(renderOverview); }
+}
+function ovZoomBy(f, center) {
+  const { a, b } = ovView(), c = center ?? S.ovMin ?? (a + b) / 2, k = (c - a) / (b - a || 1), w = (b - a) * f;
+  ovZoomTo(c - k * w, c - k * w + w, true);
+}
+function ovPan(dm) { const { a, b } = ovView(); ovZoomTo(a + dm, b + dm); }
+
+// Computer: hover reads values; drag across a chart to zoom into that period; double-click resets
+let ovDrag = null;
 document.addEventListener("pointermove", e => {
   if (e.pointerType !== "mouse") return;
+  if (ovDrag) {
+    const { svg, p, m0 } = ovDrag, m1 = ovAtRaw(svg, p, e.clientX), F = p.F;
+    ovDrag.m1 = m1;
+    if (Math.abs(e.clientX - ovDrag.x0) > 6) {
+      ovDrag.moved = true; ovHideTips();
+      const lo = Math.max(F.a, Math.min(m0, m1)), hi = Math.min(F.b, Math.max(m0, m1));
+      OVP.forEach((q, n) => { const sv = document.querySelector(`[data-ovs="${n}"]`); if (!sv) return; const G = q.F, t = G.subs[0].top, bt = G.subs[G.subs.length - 1].bot;
+        sv.querySelector(".ovxh").innerHTML = `<rect x="${G.x(lo)}" y="${t}" width="${Math.max(1, G.x(hi) - G.x(lo))}" height="${bt - t}" fill="rgba(124,147,255,.18)" stroke="rgba(124,147,255,.7)"/>`; });
+    }
+    return;
+  }
   const svg = e.target.closest?.("[data-ovs]");
   if (!svg) { if (document.querySelector(".ovtip:not([hidden])")) ovHideTips(); return; }
   const i = +svg.dataset.ovs, p = OVP[i]; if (!p) return;
@@ -1266,13 +1316,69 @@ document.addEventListener("pointermove", e => {
   ovTip(i, m, e);
 });
 document.addEventListener("pointerdown", e => {
+  if (e.pointerType !== "mouse" || e.button !== 0) return;
+  const svg = e.target.closest?.("[data-ovs]"); if (!svg) return;
+  const p = OVP[+svg.dataset.ovs]; if (!p) return;
+  e.preventDefault();
+  ovDrag = { svg, p, x0: e.clientX, m0: ovAtRaw(svg, p, e.clientX), moved: false };
+});
+addEventListener("pointerup", e => {
+  if (e.pointerType !== "mouse" || !ovDrag) return;
+  const d = ovDrag; ovDrag = null;
+  if (d.moved && d.m1 != null) { const lo = Math.min(d.m0, d.m1), hi = Math.max(d.m0, d.m1); if (hi - lo >= 60) return ovZoomTo(lo, hi, true); }
+  ovCursor(S.ovMin);
+});
+document.addEventListener("dblclick", e => { if (e.target.closest?.("[data-ovs]")) { S.ovZ = null; renderOverview(); } });
+// Trackpad pinch / Ctrl+scroll zooms around the pointer; sideways scroll pans
+document.addEventListener("wheel", e => {
+  const svg = e.target.closest?.("[data-ovs]"); if (!svg) return;
+  const p = OVP[+svg.dataset.ovs]; if (!p) return;
+  if (e.ctrlKey || e.metaKey) { e.preventDefault(); ovZoomBy(Math.exp(e.deltaY * 0.01), ovAtRaw(svg, p, e.clientX)); }
+  else if (S.ovZ && Math.abs(e.deltaX) > Math.abs(e.deltaY)) { e.preventDefault(); ovPan(e.deltaX / svg.getBoundingClientRect().width * p.F.span); }
+}, { passive: false });
+
+// Touch: one finger reads values; two fingers pinch to zoom (and pan while pinching)
+const ovTouches = new Map(); let ovPinch = null;
+document.addEventListener("pointerdown", e => {
   if (e.pointerType === "mouse") return;
   const svg = e.target.closest?.("[data-ovs]"); if (!svg) return;
   const p = OVP[+svg.dataset.ovs]; if (!p) return;
-  const at = ev => { const r = svg.getBoundingClientRect(), sx = (ev.clientX - r.left) / r.width * p.F.W; return Math.round(((sx - p.F.L) / (p.F.W - p.F.L - p.F.R)) * p.F.span / 60) * 60; };
-  ovCursor(at(e));
-  const mv = ev => ovCursor(at(ev)), up = () => { svg.removeEventListener("pointermove", mv); removeEventListener("pointerup", up); removeEventListener("pointercancel", up); };
-  svg.addEventListener("pointermove", mv); addEventListener("pointerup", up); addEventListener("pointercancel", up);
+  ovTouches.set(e.pointerId, { x: e.clientX, idx: +svg.dataset.ovs });
+  if (ovTouches.size === 2) {
+    const [t1, t2] = [...ovTouches.values()], { a, b } = ovView();
+    ovPinch = { d0: Math.abs(t1.x - t2.x) || 1, a, b, mid: ovAtRaw(svg, p, (t1.x + t2.x) / 2), frac: 0 };
+    const r = svg.getBoundingClientRect(), sx = ((t1.x + t2.x) / 2 - r.left) / r.width * p.F.W;
+    ovPinch.frac = (sx - p.F.L) / (p.F.W - p.F.L - p.F.R);
+    return;
+  }
+  if (ovTouches.size === 1) ovCursor(ovAt(svg, p, e));
+});
+document.addEventListener("pointermove", e => {
+  if (e.pointerType === "mouse" || !ovTouches.has(e.pointerId)) return;
+  const t = ovTouches.get(e.pointerId); t.x = e.clientX;
+  // the charts are redrawn while zooming, so always measure the current one
+  const svg = document.querySelector(`[data-ovs="${t.idx}"]`), p = OVP[t.idx]; if (!svg || !p) return;
+  const r = svg.getBoundingClientRect(); if (!r.width) return;
+  if (ovPinch && ovTouches.size >= 2) {
+    const [t1, t2] = [...ovTouches.values()], d = Math.abs(t1.x - t2.x) || 1, w = (ovPinch.b - ovPinch.a) * ovPinch.d0 / d;
+    const sx = ((t1.x + t2.x) / 2 - r.left) / r.width * p.F.W, frac = (sx - p.F.L) / (p.F.W - p.F.L - p.F.R);
+    if (isFinite(w) && isFinite(frac)) ovZoomTo(ovPinch.mid - frac * w, ovPinch.mid - frac * w + w);
+  } else if (!ovPinch) ovCursor(ovAt(svg, p, e));
+});
+const ovTouchEnd = e => { if (!ovTouches.delete(e.pointerId)) return; if (ovTouches.size < 2) ovPinch = null; };
+addEventListener("pointerup", ovTouchEnd); addEventListener("pointercancel", ovTouchEnd);
+
+// Zoom bar under the controls: drag the highlighted part to pan
+document.addEventListener("pointerdown", e => {
+  const nav = e.target.closest?.(".ovnav"); if (!nav) return;
+  e.preventDefault();
+  const r = nav.getBoundingClientRect(), { span } = ovWin(), { a, b } = ovView(), w = b - a;
+  const toM = x => (x - r.left) / r.width * span;
+  const onThumb = e.target.closest(".ovthumb"), off = onThumb ? toM(e.clientX) - a : w / 2;
+  if (!onThumb) ovZoomTo(toM(e.clientX) - off, toM(e.clientX) - off + w, true);
+  const mv = ev => ovZoomTo(toM(ev.clientX) - off, toM(ev.clientX) - off + w);
+  const up = () => { removeEventListener("pointermove", mv); removeEventListener("pointerup", up); removeEventListener("pointercancel", up); };
+  addEventListener("pointermove", mv); addEventListener("pointerup", up); addEventListener("pointercancel", up);
 });
 
 // ---------- Custom overlay tab ----------
@@ -1641,7 +1747,9 @@ document.addEventListener("click", e => {
   const ovm = t.closest("[data-ovm]");
   if (ovm) { const id = ovm.dataset.ovm, cur = ovPick(); if (cur.includes(id)) { if (cur.length > 1) S.ovModels = cur.filter(x => x !== id); } else if (cur.length < OV_MAX) S.ovModels = [...cur, id]; else return flash(`Up to ${OV_MAX} models at once`); LS.set("ovModels", S.ovModels); return renderOverview(); }
   if (t.closest("[data-ovopen]")) { S.ovOpen = !S.ovOpen; return renderOverview(); }
-  const ovr = t.closest("[data-ovr]"); if (ovr) { S.ovRange = +ovr.dataset.ovr; LS.set("ovRange", S.ovRange); S.ovMin = null; return renderOverview(); }
+  const ovz = t.closest("[data-ovz]");
+  if (ovz) { const k = ovz.dataset.ovz; if (k === "reset") { S.ovZ = null; return renderOverview(); } return ovZoomBy(k === "in" ? 0.5 : 2); }
+  const ovr = t.closest("[data-ovr]"); if (ovr) { S.ovZ = null; S.ovRange = +ovr.dataset.ovr; LS.set("ovRange", S.ovRange); S.ovMin = null; return renderOverview(); }
   if (t.closest("[data-ovobs]")) { S.ovObs = !S.ovObs; LS.set("ovObs", S.ovObs); return renderOverview(); }
   const cpb = t.closest("[data-cp]");
   if (cpb) { const k = cpb.dataset.cp, a = S.cparams; if (a.includes(k)) { if (a.length > 1) a.splice(a.indexOf(k), 1); } else if (a.length < MAX_CP) a.push(k); else return flash(`Up to ${MAX_CP} parameters`); LS.set("cparams", a); return renderAll(); }
@@ -1802,7 +1910,7 @@ async function loadLocation(p, keepView, tab) {
   try {
     const D = await fetchForecast(S.loc.lat, S.loc.lon);
     S.data = D; loadVerification(D); applyRange();
-    if (!keepView) { S.start = todayIdx(); S.sel = ""; }
+    if (!keepView) { S.start = todayIdx(); S.sel = ""; S.ovZ = null; }
     S.start = Math.max(0, Math.min(D.dates.length - S.range, S.start));
     S.min = null;
     $("status").hidden = true; $("view").hidden = false;

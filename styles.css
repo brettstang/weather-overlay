@@ -632,3 +632,14 @@ body[data-tab="custom"] .tablecard, body[data-tab="custom"] #modelsBtn { display
 .rrow .sw8 { margin-right: 0; }
 .dt tbody th .sw8 { margin-right: 7px; vertical-align: 1px; }
 .mrow .sw8 { margin-right: 0; }
+/* overview zoom */
+.ovzoom button { display: grid; place-items: center; min-width: 36px; }
+.ovzoom svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.ovnavw { margin: -4px 0 12px; }
+.ovnav { position: relative; height: 22px; border-radius: 8px; background: rgba(255,255,255,.05); border: 1px solid var(--stroke); cursor: pointer; touch-action: none; }
+.ovnav > i { position: absolute; top: 4px; bottom: 4px; width: 1px; background: rgba(255,255,255,.14); }
+.ovthumb { position: absolute; top: 2px; bottom: 2px; border-radius: 6px; background: rgba(124,147,255,.35); border: 1px solid rgba(124,147,255,.8); cursor: grab; min-width: 8px; }
+.ovthumb:active { cursor: grabbing; }
+.ovnavl { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 5px; }
+.ovnavl b { color: var(--text); font-weight: 600; } .ovnavh { color: var(--faint); }
+@media (hover: hover) and (pointer: fine) { .ovc svg { cursor: crosshair; } }
