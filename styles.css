@@ -643,3 +643,26 @@ body[data-tab="custom"] .tablecard, body[data-tab="custom"] #modelsBtn { display
 .ovnavl { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 5px; }
 .ovnavl b { color: var(--text); font-weight: 600; } .ovnavh { color: var(--faint); }
 @media (hover: hover) and (pointer: fine) { .ovc svg { cursor: crosshair; } }
+/* overview: let pinches through to the charts instead of zooming the page */
+.overview { touch-action: pan-y; }
+/* overview full screen */
+.ovfs { position: fixed; inset: 0; z-index: 300; background: var(--bg1); display: flex; align-items: center; justify-content: center; overflow: hidden; touch-action: none; }
+.ovfsbox { position: relative; flex: none; box-sizing: border-box; display: flex; flex-direction: column; background: linear-gradient(180deg, #0a0e22, #141a40);
+  padding: calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 12px) calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 12px); }
+.ovfs.rot .ovfsbox { transform: rotate(90deg); padding: 8px 14px; }
+.ovfsh { display: flex; align-items: center; gap: 8px; flex: none; margin-bottom: 6px; padding-right: 44px; flex-wrap: wrap; }
+.ovfsh .seg button { padding: 6px 11px; }
+.ovfsx { position: absolute; top: 8px; right: 10px; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--stroke-2); background: rgba(255,255,255,.1); color: #fff; font-size: 16px; cursor: pointer; z-index: 3; }
+.ovfs:not(.rot) .ovfsx { top: calc(env(safe-area-inset-top) + 8px); }
+.ovfsl { display: flex; gap: 14px; flex: 1; min-height: 0; }
+.ovfsp { flex: 1; min-width: 0; margin: 0; padding: 6px 6px 4px; background: none; border: 0; box-shadow: none; }
+.ovfsp .ovph h3 { font-size: 14px; }
+.ovfsp .ovleg { padding-top: 2px; }
+.ovfsr { width: min(280px, 27%); flex: none; overflow-y: auto; padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.25); border: 1px solid var(--stroke); font-size: 13px; font-variant-numeric: tabular-nums; }
+.ovfsr .tth { font-weight: 700; margin-bottom: 6px; }
+.ovfsr .ttr { display: flex; align-items: center; gap: 7px; line-height: 1.75; }
+.ovfsr .ttr i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.ovfsr .ttr span { color: var(--muted); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ovfsr .ttr b { white-space: nowrap; }
+.ovfsr .tts { color: var(--faint); font-size: 11px; margin: -3px 0 2px 15px; }
+.ovfsp .ovv .tth, .ovfsp .ovv .ttr { display: inline; margin-right: 8px; } .ovfsp .ovv .ttr i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; }

@@ -816,7 +816,7 @@ function ovObs(field) {
 function ovFrame(W, rows) {
   const narrow = W < 560, L = narrow ? 36 : 46, R = narrow ? 38 : 50, top0 = 20, xlab = 20, gap = 10;
   const { ws, span: full } = ovWin(), { a, b } = ovView(), span = b - a, D = S.data;
-  let y = top0; const subs = rows.map(r => { const s = { ...r, top: y, bot: y + r.h }; y += r.h + gap; return s; });
+  let y = top0; const subs = rows.map(r => { const h = Math.round(r.h * OVH); const s = { ...r, h, top: y, bot: y + h }; y += h + gap; return s; });
   const H = y - gap + xlab;
   const x = m => L + ((m - a) / span) * (W - L - R);
   const days = span / 1440, pxH = (W - L - R) / (span / 60);
@@ -1203,18 +1203,20 @@ function renderOverview() {
   const head = `<div class="ovbar">
       <label class="ovsel"><span>Source</span><select id="ovSrc">${opts}</select></label>
       <div class="seg" id="ovRange">${OV_RANGES.map(r => `<button data-ovr="${r}" class="${S.ovRange === r ? "on" : ""}">${r}D</button>`).join("")}</div>
+      <button class="btn icon" data-ovfs aria-label="Full screen" title="Full screen"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
       <div class="seg ovzoom" role="group" aria-label="Zoom"><button data-ovz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button><button data-ovz="in" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>${S.ovZ ? `<button data-ovz="reset">Reset</button>` : ""}</div>
       ${st ? `<button class="chip${S.ovObs ? " on" : ""}" data-ovobs aria-pressed="${!!S.ovObs}"><i class="ld" style="background:#fff"></i>Observed ${esc(st.id)}</button>` : ""}
       ${src.single || src.multi ? "" : `<button class="linkbtn" data-open-models>Change models</button>`}
     </div>${S.ovZ ? ovNavBar() : ""}${src.multi ? ovPicker() : ""}`;
   const W2 = W - 2;
-  OVP = (src.multi ? [ovTempMulti(W2), ovPrecipMulti(W2), ovWindMulti(W2), ovStormMulti(W2)] : [ovTempPanel(W2), ovPrecipPanel(W2), ovWindPanel(W2), ovStormPanel(W2)]).filter(Boolean);
+  OVP = ovBuilders().map(f => f(W2)).filter(Boolean);
   host.innerHTML = head + OVP.map((p, i) => `<section class="card ovpanel" data-ovi="${i}">
       <div class="ovph"><h3>${esc(p.title)}</h3><div class="ovv" data-ovv="${i}"></div></div>
       <div class="ovc"><svg viewBox="0 0 ${p.F.W} ${p.F.H}" width="100%" style="touch-action:pan-y" data-ovs="${i}">${p.svg}<g class="ovxh"></g><rect x="${p.F.L}" y="0" width="${p.F.W - p.F.L - p.F.R}" height="${p.F.H}" fill="transparent"/></svg></div>
       <div class="ovleg">${p.legend}${p.note ? `<span class="lg-n">${esc(p.note)}</span>` : ""}</div></section>`).join("") +
     `<div class="ovfoot">${esc(src.label)} · ${src.multi ? "colour = model, line style = parameter" : src.single ? "single model" : "shaded = range across models"} · ${matchMedia("(pointer: fine)").matches ? "hover" : "drag across"} any chart to read values</div>`;
   ovCursor(S.ovMin ?? Math.max(0, Math.round((nowMin() - ovWin().ws) / 60) * 60));
+  if (S.ovFS) renderOvFS();
   const hint = host.querySelector(".ovfoot"); if (hint && !S.ovZ) hint.insertAdjacentHTML("beforeend", ` · ${matchMedia("(pointer: fine)").matches ? "drag across a chart to zoom" : "pinch a chart to zoom"}`);
   // Load helicity when the storm panel scrolls into view
   if (!D.srhState && "IntersectionObserver" in window) {
@@ -1240,6 +1242,48 @@ function ovTip(i, m, ev) {
   tip.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
 }
 function ovHideTips() { document.querySelectorAll(".ovtip").forEach(t => t.hidden = true); }
+const ovBuilders = () => ovSource().multi ? [ovTempMulti, ovPrecipMulti, ovWindMulti, ovStormMulti] : [ovTempPanel, ovPrecipPanel, ovWindPanel, ovStormPanel];
+const OV_FS_NAMES = ["Temp", "Precip", "Wind", "CAPE"];
+// ---------- Overview full screen: one chart at a time, sideways on a phone held upright ----------
+function openOvFS(i = 0) {
+  closeOvFS();
+  S.ovFS = { i };
+  const fs = document.createElement("div");
+  fs.className = "ovfs"; fs.innerHTML = `<div class="ovfsbox"></div>`;
+  document.body.appendChild(fs); document.body.classList.add("fs-open");
+  renderOvFS();
+}
+function closeOvFS() { document.querySelector(".ovfs")?.remove(); delete OVP.f; S.ovFS = null; if (!document.querySelector(".modal:not([hidden]), .fs")) document.body.classList.remove("fs-open"); }
+function renderOvFS() {
+  const fs = document.querySelector(".ovfs"); if (!fs || !S.ovFS || !S.data) return;
+  const box = fs.firstChild, vw = innerWidth, vh = innerHeight, rot = vh > vw && vw < 760;
+  const long = rot ? vh : vw, short = rot ? vw : vh;
+  fs.classList.toggle("rot", rot);
+  box.style.width = long + "px"; box.style.height = short + "px";
+  const side = long >= 700 ? Math.min(280, Math.round(long * 0.27)) : 0;          // values panel beside the chart
+  const padX = 24, W = Math.max(320, long - side - padX - (side ? 14 : 0)), availH = short - 118;
+  const b = ovBuilders()[S.ovFS.i] || ovBuilders()[0];
+  OVH = 1; let p = b(W);
+  if (!p) { S.ovFS.i = 0; p = ovBuilders()[0](W); }
+  if (p) { OVH = Math.max(0.6, Math.min(2.4, OVH * (availH - 40) / (p.F.H - 40))); p = b(W) || p; }
+  OVH = 1;
+  OVP.f = p;
+  const { a, b: bb } = ovView();
+  box.innerHTML = `<div class="ovfsh">
+      <div class="seg">${OV_FS_NAMES.map((n, k) => `<button data-ovfsi="${k}" class="${k === S.ovFS.i ? "on" : ""}">${n}</button>`).join("")}</div>
+      <div class="seg ovzoom">${S.ovZ ? `<button data-ovpan="-1" aria-label="Earlier">‹</button>` : ""}<button data-ovz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button><button data-ovz="in" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>${S.ovZ ? `<button data-ovpan="1" aria-label="Later">›</button><button data-ovz="reset">Reset</button>` : ""}</div>
+      <button class="ovfsx" aria-label="Close">✕</button>
+    </div>
+    <div class="ovfsl">
+      <section class="ovpanel ovfsp" data-ovi="f">
+        <div class="ovph"><h3>${esc(S.loc.name)} · ${esc(p ? p.title : "")}</h3>${side ? "" : `<div class="ovv" data-ovv="f"></div>`}</div>
+        <div class="ovc">${p ? `<svg viewBox="0 0 ${p.F.W} ${p.F.H}" width="100%" style="touch-action:none" data-ovs="f">${p.svg}<g class="ovxh"></g><rect x="${p.F.L}" y="0" width="${p.F.W - p.F.L - p.F.R}" height="${p.F.H}" fill="transparent"/></svg>` : ""}</div>
+        <div class="ovleg">${p ? p.legend : ""}</div>
+      </section>
+      ${side ? `<aside class="ovfsr" data-ovv="f"></aside>` : ""}
+    </div>`;
+  ovCursor(S.ovMin ?? Math.round((nowMin() - ovWin().ws) / 60) * 60);
+}
 function ovNavBar() {
   const { span, ws } = ovWin(), { a, b } = ovView(), D = S.data;
   const lab = m => { const abs = ws + m, di = Math.min(D.dates.length - 1, Math.floor(abs / 1440)); return `${dayShort(D.dates[di])} ${pad(Math.floor(abs / 60) % 24)}:00`; };
@@ -1253,15 +1297,21 @@ function ovPicker() {
     all.filter(id => open || sel.includes(id)).map(id => { const on = sel.includes(id); return `<button class="mchip${on ? " on" : ""}" data-ovm="${id}" aria-pressed="${on}" style="${on ? `border-color:${mc(id)}` : ""}"><i style="background:${on ? mc(id) : colorOf(id)};opacity:${on ? 1 : .5}"></i>${esc(META(id).short)}</button>`; }).join("")
   }${all.length > 10 ? `<button class="mchip more" data-ovopen>${S.ovOpen ? "Done" : `+ Add models <small>${all.length - sel.length} more</small>`}</button>` : ""}</div></div>`;
 }
+const ovKeys = () => [...OVP.keys()].map(String).concat(OVP.f ? ["f"] : []);
 function ovCursor(m) {
   const { a, b } = ovView(); m = Math.max(a, Math.min(b, m)); S.ovMin = m;
   const D = S.data, ws = ovWin().ws, abs = ws + m, di = Math.min(D.dates.length - 1, Math.floor(abs / 1440));
   const when = `${dayShort(D.dates[di])} ${pad(Math.floor(abs / 60) % 24)}:00`;
-  OVP.forEach((p, i) => {
-    const svg = document.querySelector(`[data-ovs="${i}"]`); if (!svg) return;
+  ovKeys().forEach(i => {
+    const p = OVP[i], svg = document.querySelector(`[data-ovs="${i}"]`); if (!svg) return;
     const F = p.F, x = F.x(m), top = F.subs[0].top, bot = F.subs[F.subs.length - 1].bot;
     svg.querySelector(".ovxh").innerHTML = `<line x1="${x}" x2="${x}" y1="${top}" y2="${bot}" stroke="rgba(255,255,255,.55)"/>` + p.dots(m).map(([mm, yy, c]) => `<circle cx="${F.x(mm)}" cy="${yy}" r="3.6" fill="${c}" stroke="#0a0e22" stroke-width="1.5"/>`).join("");
     const v = document.querySelector(`[data-ovv="${i}"]`); if (!v) return;
+    if (i === "f") {   // full screen: every value at the cursor, listed beside the chart
+      const rows = (p.tip ? p.tip(m) : []).filter(Boolean);
+      v.innerHTML = `<div class="tth">${ovWhen(m)}</div>` + rows.map(([l, val, c, sub]) => `<div class="ttr"><i style="background:${c}"></i><span>${esc(l)}</span><b>${esc(val)}</b></div>${sub ? `<div class="tts">${esc(sub)}</div>` : ""}`).join("");
+      return;
+    }
     if (p.table) {
       const t = p.table(m), st = S.data.obs?.station;
       // highlight the highest and lowest model in the key column
@@ -1274,10 +1324,17 @@ function ovCursor(m) {
   });
 }
 // Computer: just moving the mouse moves the cursor on every chart and shows the tooltip
-function ovAtRaw(svg, p, x) { const r = svg.getBoundingClientRect(), sx = (x - r.left) / r.width * p.F.W; return p.F.a + ((sx - p.F.L) / (p.F.W - p.F.L - p.F.R)) * p.F.span; }
-function ovAt(svg, p, ev) { return Math.max(p.F.a, Math.min(p.F.b, Math.round(ovAtRaw(svg, p, ev.clientX) / 60) * 60)); }
+const ovRot = svg => !!svg.closest?.(".ovfs.rot");
+// position along the time axis (0..1) for a screen point; a sideways (rotated) chart runs top-to-bottom
+function ovFrac(svg, p, cx, cy) {
+  const r = svg.getBoundingClientRect(), rot = ovRot(svg);
+  const sx = rot ? (cy - r.top) / r.height * p.F.W : (cx - r.left) / r.width * p.F.W;
+  return (sx - p.F.L) / (p.F.W - p.F.L - p.F.R);
+}
+function ovAtRaw(svg, p, cx, cy) { return p.F.a + ovFrac(svg, p, cx, cy) * p.F.span; }
+function ovAt(svg, p, ev) { return Math.max(p.F.a, Math.min(p.F.b, Math.round(ovAtRaw(svg, p, ev.clientX, ev.clientY) / 60) * 60)); }
 // ---------- Overview zoom ----------
-let ovRaf = 0;
+let ovRaf = 0, OVH = 1;
 function ovZoomTo(a, b, now) {
   if (!isFinite(a) || !isFinite(b)) return;
   const { span } = ovWin();
@@ -1297,19 +1354,19 @@ let ovDrag = null;
 document.addEventListener("pointermove", e => {
   if (e.pointerType !== "mouse") return;
   if (ovDrag) {
-    const { svg, p, m0 } = ovDrag, m1 = ovAtRaw(svg, p, e.clientX), F = p.F;
+    const { svg, p, m0 } = ovDrag, m1 = ovAtRaw(svg, p, e.clientX, e.clientY), F = p.F;
     ovDrag.m1 = m1;
     if (Math.abs(e.clientX - ovDrag.x0) > 6) {
       ovDrag.moved = true; ovHideTips();
       const lo = Math.max(F.a, Math.min(m0, m1)), hi = Math.min(F.b, Math.max(m0, m1));
-      OVP.forEach((q, n) => { const sv = document.querySelector(`[data-ovs="${n}"]`); if (!sv) return; const G = q.F, t = G.subs[0].top, bt = G.subs[G.subs.length - 1].bot;
+      ovKeys().forEach(n => { const q = OVP[n], sv = document.querySelector(`[data-ovs="${n}"]`); if (!sv) return; const G = q.F, t = G.subs[0].top, bt = G.subs[G.subs.length - 1].bot;
         sv.querySelector(".ovxh").innerHTML = `<rect x="${G.x(lo)}" y="${t}" width="${Math.max(1, G.x(hi) - G.x(lo))}" height="${bt - t}" fill="rgba(124,147,255,.18)" stroke="rgba(124,147,255,.7)"/>`; });
     }
     return;
   }
   const svg = e.target.closest?.("[data-ovs]");
   if (!svg) { if (document.querySelector(".ovtip:not([hidden])")) ovHideTips(); return; }
-  const i = +svg.dataset.ovs, p = OVP[i]; if (!p) return;
+  const i = svg.dataset.ovs, p = OVP[i]; if (!p) return;
   const m = ovAt(svg, p, e);
   if (m !== S.ovMin) ovCursor(m);
   document.querySelectorAll(".ovtip").forEach(t => { if (!t.closest(`[data-ovi="${i}"]`)) t.hidden = true; });
@@ -1318,9 +1375,9 @@ document.addEventListener("pointermove", e => {
 document.addEventListener("pointerdown", e => {
   if (e.pointerType !== "mouse" || e.button !== 0) return;
   const svg = e.target.closest?.("[data-ovs]"); if (!svg) return;
-  const p = OVP[+svg.dataset.ovs]; if (!p) return;
+  const p = OVP[svg.dataset.ovs]; if (!p) return;
   e.preventDefault();
-  ovDrag = { svg, p, x0: e.clientX, m0: ovAtRaw(svg, p, e.clientX), moved: false };
+  ovDrag = { svg, p, x0: e.clientX, m0: ovAtRaw(svg, p, e.clientX, e.clientY), moved: false };
 });
 addEventListener("pointerup", e => {
   if (e.pointerType !== "mouse" || !ovDrag) return;
@@ -1332,39 +1389,44 @@ document.addEventListener("dblclick", e => { if (e.target.closest?.("[data-ovs]"
 // Trackpad pinch / Ctrl+scroll zooms around the pointer; sideways scroll pans
 document.addEventListener("wheel", e => {
   const svg = e.target.closest?.("[data-ovs]"); if (!svg) return;
-  const p = OVP[+svg.dataset.ovs]; if (!p) return;
-  if (e.ctrlKey || e.metaKey) { e.preventDefault(); ovZoomBy(Math.exp(e.deltaY * 0.01), ovAtRaw(svg, p, e.clientX)); }
+  const p = OVP[svg.dataset.ovs]; if (!p) return;
+  if (e.ctrlKey || e.metaKey) { e.preventDefault(); ovZoomBy(Math.exp(e.deltaY * 0.01), ovAtRaw(svg, p, e.clientX, e.clientY)); }
   else if (S.ovZ && Math.abs(e.deltaX) > Math.abs(e.deltaY)) { e.preventDefault(); ovPan(e.deltaX / svg.getBoundingClientRect().width * p.F.span); }
 }, { passive: false });
 
-// Touch: one finger reads values; two fingers pinch to zoom (and pan while pinching)
+// Touch: one finger reads values; two fingers pinch to zoom (and pan while pinching).
+// The second finger may land anywhere on the overview — it doesn't have to be on the chart.
 const ovTouches = new Map(); let ovPinch = null;
+const ovAxisPos = (t, rot) => rot ? t.y : t.x;
 document.addEventListener("pointerdown", e => {
   if (e.pointerType === "mouse") return;
-  const svg = e.target.closest?.("[data-ovs]"); if (!svg) return;
-  const p = OVP[+svg.dataset.ovs]; if (!p) return;
-  ovTouches.set(e.pointerId, { x: e.clientX, idx: +svg.dataset.ovs });
+  let svg = e.target.closest?.("[data-ovs]"), idx;
+  if (svg) idx = svg.dataset.ovs;
+  else if (ovTouches.size === 1 && e.target.closest?.("#overview, .ovfs")) idx = [...ovTouches.values()][0].idx;
+  else return;
+  if (!OVP[idx]) return;
+  ovTouches.set(e.pointerId, { x: e.clientX, y: e.clientY, idx });
   if (ovTouches.size === 2) {
-    const [t1, t2] = [...ovTouches.values()], { a, b } = ovView();
-    ovPinch = { d0: Math.abs(t1.x - t2.x) || 1, a, b, mid: ovAtRaw(svg, p, (t1.x + t2.x) / 2), frac: 0 };
-    const r = svg.getBoundingClientRect(), sx = ((t1.x + t2.x) / 2 - r.left) / r.width * p.F.W;
-    ovPinch.frac = (sx - p.F.L) / (p.F.W - p.F.L - p.F.R);
+    const [t1, t2] = [...ovTouches.values()], sv = document.querySelector(`[data-ovs="${idx}"]`), p = OVP[idx], rot = ovRot(sv), { a, b } = ovView();
+    const mx = (t1.x + t2.x) / 2, my = (t1.y + t2.y) / 2;
+    ovPinch = { d0: Math.max(30, Math.abs(ovAxisPos(t1, rot) - ovAxisPos(t2, rot))), a, b, mid: ovAtRaw(sv, p, mx, my) };
     return;
   }
-  if (ovTouches.size === 1) ovCursor(ovAt(svg, p, e));
+  if (ovTouches.size === 1 && svg) ovCursor(ovAt(svg, OVP[idx], e));
 });
 document.addEventListener("pointermove", e => {
   if (e.pointerType === "mouse" || !ovTouches.has(e.pointerId)) return;
-  const t = ovTouches.get(e.pointerId); t.x = e.clientX;
+  const t = ovTouches.get(e.pointerId); t.x = e.clientX; t.y = e.clientY;
   // the charts are redrawn while zooming, so always measure the current one
   const svg = document.querySelector(`[data-ovs="${t.idx}"]`), p = OVP[t.idx]; if (!svg || !p) return;
   const r = svg.getBoundingClientRect(); if (!r.width) return;
   if (ovPinch && ovTouches.size >= 2) {
-    const [t1, t2] = [...ovTouches.values()], d = Math.abs(t1.x - t2.x) || 1, w = (ovPinch.b - ovPinch.a) * ovPinch.d0 / d;
-    const sx = ((t1.x + t2.x) / 2 - r.left) / r.width * p.F.W, frac = (sx - p.F.L) / (p.F.W - p.F.L - p.F.R);
+    e.preventDefault?.();
+    const rot = ovRot(svg), [t1, t2] = [...ovTouches.values()], d = Math.max(30, Math.abs(ovAxisPos(t1, rot) - ovAxisPos(t2, rot)));
+    const w = (ovPinch.b - ovPinch.a) * ovPinch.d0 / d, frac = ovFrac(svg, p, (t1.x + t2.x) / 2, (t1.y + t2.y) / 2);
     if (isFinite(w) && isFinite(frac)) ovZoomTo(ovPinch.mid - frac * w, ovPinch.mid - frac * w + w);
-  } else if (!ovPinch) ovCursor(ovAt(svg, p, e));
-});
+  } else if (!ovPinch && e.target.closest?.("[data-ovs]")) ovCursor(ovAt(svg, p, e));
+}, { passive: false });
 const ovTouchEnd = e => { if (!ovTouches.delete(e.pointerId)) return; if (ovTouches.size < 2) ovPinch = null; };
 addEventListener("pointerup", ovTouchEnd); addEventListener("pointercancel", ovTouchEnd);
 
@@ -1747,6 +1809,10 @@ document.addEventListener("click", e => {
   const ovm = t.closest("[data-ovm]");
   if (ovm) { const id = ovm.dataset.ovm, cur = ovPick(); if (cur.includes(id)) { if (cur.length > 1) S.ovModels = cur.filter(x => x !== id); } else if (cur.length < OV_MAX) S.ovModels = [...cur, id]; else return flash(`Up to ${OV_MAX} models at once`); LS.set("ovModels", S.ovModels); return renderOverview(); }
   if (t.closest("[data-ovopen]")) { S.ovOpen = !S.ovOpen; return renderOverview(); }
+  if (t.closest("[data-ovfs]")) return openOvFS(0);
+  if (t.closest(".ovfsx")) return closeOvFS();
+  const ofi = t.closest("[data-ovfsi]"); if (ofi) { S.ovFS.i = +ofi.dataset.ovfsi; return renderOvFS(); }
+  const opn = t.closest("[data-ovpan]"); if (opn) { const { a, b } = ovView(); return ovZoomTo(a + (b - a) / 2 * +opn.dataset.ovpan, b + (b - a) / 2 * +opn.dataset.ovpan, true); }
   const ovz = t.closest("[data-ovz]");
   if (ovz) { const k = ovz.dataset.ovz; if (k === "reset") { S.ovZ = null; return renderOverview(); } return ovZoomBy(k === "in" ? 0.5 : 2); }
   const ovr = t.closest("[data-ovr]"); if (ovr) { S.ovZ = null; S.ovRange = +ovr.dataset.ovr; LS.set("ovRange", S.ovRange); S.ovMin = null; return renderOverview(); }
@@ -1811,12 +1877,12 @@ function setStart(i) {
   if (chip) { const strip = $("days"); strip.scrollTo({ left: Math.max(0, chip.offsetLeft - strip.offsetLeft - 8), behavior: "smooth" }); }
 }
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") { closeFS(); closeModal("modelsModal"); closeModal("optsModal"); hideSugg(); }
+  if (e.key === "Escape") { closeOvFS(); closeFS(); closeModal("modelsModal"); closeModal("optsModal"); hideSugg(); }
   if (!S.data || S.tab === "overview" || /input|textarea/i.test(e.target.tagName) || document.querySelector(".modal:not([hidden])")) return;
   if (e.key === "ArrowLeft" && !e.target.closest(".days,.tabs")) setStart(S.start - S.range);
   if (e.key === "ArrowRight" && !e.target.closest(".days,.tabs")) setStart(S.start + S.range);
 });
-let rz, lastW = innerWidth; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if (!S.data) return; if (S.tab === "overview") { if (innerWidth !== lastW) renderOverview(); } else renderMain(); lastW = innerWidth; }, 150); });
+let rz, lastW = innerWidth; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if (!S.data) return; if (S.tab === "overview") { if (S.ovFS) renderOvFS(); if (innerWidth !== lastW) renderOverview(); } else renderMain(); lastW = innerWidth; }, 150); });
 
 // ---------- Search ----------
 function parseCoords(s) {
