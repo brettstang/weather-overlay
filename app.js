@@ -790,7 +790,7 @@ function ovWin() {
 }
 // Zoom: the visible part of the window, in minutes from the window start
 function ovView() {
-  const { span } = ovWin(), z = S.ovZ;
+  const { span } = ovWin(), z = canZoom() ? S.ovZ : null;
   if (!z) return { a: 0, b: span };
   const a = Math.max(0, Math.min(z.a, span - 180)), b = Math.min(span, Math.max(z.b, a + 180));
   return { a, b };
@@ -1203,21 +1203,21 @@ function renderOverview() {
   const head = `<div class="ovbar">
       <label class="ovsel"><span>Source</span><select id="ovSrc">${opts}</select></label>
       <div class="seg" id="ovRange">${OV_RANGES.map(r => `<button data-ovr="${r}" class="${S.ovRange === r ? "on" : ""}">${r}D</button>`).join("")}</div>
-      <button class="btn icon" data-ovfs aria-label="Full screen" title="Full screen"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
-      <div class="seg ovzoom" role="group" aria-label="Zoom"><button data-ovz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button><button data-ovz="in" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>${S.ovZ ? `<button data-ovz="reset">Reset</button>` : ""}</div>
+      ${canZoom() ? "" : "<!--"}<div class="seg ovzoom" role="group" aria-label="Zoom"><button data-ovz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button><button data-ovz="in" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>${S.ovZ ? `<button data-ovz="reset">Reset</button>` : ""}</div>${canZoom() ? "" : "-->"}
       ${st ? `<button class="chip${S.ovObs ? " on" : ""}" data-ovobs aria-pressed="${!!S.ovObs}"><i class="ld" style="background:#fff"></i>Observed ${esc(st.id)}</button>` : ""}
       ${src.single || src.multi ? "" : `<button class="linkbtn" data-open-models>Change models</button>`}
-    </div>${S.ovZ ? ovNavBar() : ""}${src.multi ? ovPicker() : ""}`;
+    </div>${S.ovZ && canZoom() ? ovNavBar() : ""}${src.multi ? ovPicker() : ""}`;
   const W2 = W - 2;
   OVP = ovBuilders().map(f => f(W2)).filter(Boolean);
   host.innerHTML = head + OVP.map((p, i) => `<section class="card ovpanel" data-ovi="${i}">
       <div class="ovph"><h3>${esc(p.title)}</h3><div class="ovv" data-ovv="${i}"></div></div>
+      <button class="iconbtn ovexp" data-ovfsopen="${i}" aria-label="Full screen" title="Full screen"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
       <div class="ovc"><svg viewBox="0 0 ${p.F.W} ${p.F.H}" width="100%" style="touch-action:pan-y" data-ovs="${i}">${p.svg}<g class="ovxh"></g><rect x="${p.F.L}" y="0" width="${p.F.W - p.F.L - p.F.R}" height="${p.F.H}" fill="transparent"/></svg></div>
       <div class="ovleg">${p.legend}${p.note ? `<span class="lg-n">${esc(p.note)}</span>` : ""}</div></section>`).join("") +
     `<div class="ovfoot">${esc(src.label)} · ${src.multi ? "colour = model, line style = parameter" : src.single ? "single model" : "shaded = range across models"} · ${matchMedia("(pointer: fine)").matches ? "hover" : "drag across"} any chart to read values</div>`;
   ovCursor(S.ovMin ?? Math.max(0, Math.round((nowMin() - ovWin().ws) / 60) * 60));
   if (S.ovFS) renderOvFS();
-  const hint = host.querySelector(".ovfoot"); if (hint && !S.ovZ) hint.insertAdjacentHTML("beforeend", ` · ${matchMedia("(pointer: fine)").matches ? "drag across a chart to zoom" : "pinch a chart to zoom"}`);
+  const hint = host.querySelector(".ovfoot"); if (hint && !S.ovZ) hint.insertAdjacentHTML("beforeend", canZoom() ? " · drag across a chart to zoom" : " · tap ⤢ for full screen");
   // Load helicity when the storm panel scrolls into view
   if (!D.srhState && "IntersectionObserver" in window) {
     const el = host.querySelector('[data-ovi="3"]') || host.lastElementChild;
@@ -1261,7 +1261,7 @@ function renderOvFS() {
   fs.classList.toggle("rot", rot);
   box.style.width = long + "px"; box.style.height = short + "px";
   const side = long >= 700 ? Math.min(280, Math.round(long * 0.27)) : 0;          // values panel beside the chart
-  const padX = 24, W = Math.max(320, long - side - padX - (side ? 14 : 0)), availH = short - 118;
+  const padX = 24, W = Math.max(320, long - side - padX - (side ? 14 : 0)), availH = short - (side ? 86 : 118);
   const b = ovBuilders()[S.ovFS.i] || ovBuilders()[0];
   OVH = 1; let p = b(W);
   if (!p) { S.ovFS.i = 0; p = ovBuilders()[0](W); }
@@ -1270,13 +1270,13 @@ function renderOvFS() {
   OVP.f = p;
   const { a, b: bb } = ovView();
   box.innerHTML = `<div class="ovfsh">
-      <div class="seg">${OV_FS_NAMES.map((n, k) => `<button data-ovfsi="${k}" class="${k === S.ovFS.i ? "on" : ""}">${n}</button>`).join("")}</div>
-      <div class="seg ovzoom">${S.ovZ ? `<button data-ovpan="-1" aria-label="Earlier">‹</button>` : ""}<button data-ovz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button><button data-ovz="in" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>${S.ovZ ? `<button data-ovpan="1" aria-label="Later">›</button><button data-ovz="reset">Reset</button>` : ""}</div>
+      <div class="ovfst"><b>${esc(S.loc.name)}</b> · ${esc(p ? p.title : "")}</div>
+      ${canZoom() ? "" : "<!--"}<div class="seg ovzoom">${S.ovZ ? `<button data-ovpan="-1" aria-label="Earlier">‹</button>` : ""}<button data-ovz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button><button data-ovz="in" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>${S.ovZ ? `<button data-ovpan="1" aria-label="Later">›</button><button data-ovz="reset">Reset</button>` : ""}</div>${canZoom() ? "" : "-->"}
       <button class="ovfsx" aria-label="Close">✕</button>
     </div>
     <div class="ovfsl">
       <section class="ovpanel ovfsp" data-ovi="f">
-        <div class="ovph"><h3>${esc(S.loc.name)} · ${esc(p ? p.title : "")}</h3>${side ? "" : `<div class="ovv" data-ovv="f"></div>`}</div>
+        ${side ? "" : `<div class="ovph"><div class="ovv" data-ovv="f"></div></div>`}
         <div class="ovc">${p ? `<svg viewBox="0 0 ${p.F.W} ${p.F.H}" width="100%" style="touch-action:none" data-ovs="f">${p.svg}<g class="ovxh"></g><rect x="${p.F.L}" y="0" width="${p.F.W - p.F.L - p.F.R}" height="${p.F.H}" fill="transparent"/></svg>` : ""}</div>
         <div class="ovleg">${p ? p.legend : ""}</div>
       </section>
@@ -1335,6 +1335,7 @@ function ovAtRaw(svg, p, cx, cy) { return p.F.a + ovFrac(svg, p, cx, cy) * p.F.s
 function ovAt(svg, p, ev) { return Math.max(p.F.a, Math.min(p.F.b, Math.round(ovAtRaw(svg, p, ev.clientX, ev.clientY) / 60) * 60)); }
 // ---------- Overview zoom ----------
 let ovRaf = 0, OVH = 1;
+const canZoom = () => matchMedia("(hover: hover) and (pointer: fine)").matches;
 function ovZoomTo(a, b, now) {
   if (!isFinite(a) || !isFinite(b)) return;
   const { span } = ovWin();
@@ -1406,6 +1407,7 @@ document.addEventListener("pointerdown", e => {
   else return;
   if (!OVP[idx]) return;
   ovTouches.set(e.pointerId, { x: e.clientX, y: e.clientY, idx });
+  if (ovTouches.size === 2 && !canZoom()) return;
   if (ovTouches.size === 2) {
     const [t1, t2] = [...ovTouches.values()], sv = document.querySelector(`[data-ovs="${idx}"]`), p = OVP[idx], rot = ovRot(sv), { a, b } = ovView();
     const mx = (t1.x + t2.x) / 2, my = (t1.y + t2.y) / 2;
@@ -1809,7 +1811,7 @@ document.addEventListener("click", e => {
   const ovm = t.closest("[data-ovm]");
   if (ovm) { const id = ovm.dataset.ovm, cur = ovPick(); if (cur.includes(id)) { if (cur.length > 1) S.ovModels = cur.filter(x => x !== id); } else if (cur.length < OV_MAX) S.ovModels = [...cur, id]; else return flash(`Up to ${OV_MAX} models at once`); LS.set("ovModels", S.ovModels); return renderOverview(); }
   if (t.closest("[data-ovopen]")) { S.ovOpen = !S.ovOpen; return renderOverview(); }
-  if (t.closest("[data-ovfs]")) return openOvFS(0);
+  const ofo = t.closest("[data-ovfsopen]"); if (ofo) return openOvFS(+ofo.dataset.ovfsopen);
   if (t.closest(".ovfsx")) return closeOvFS();
   const ofi = t.closest("[data-ovfsi]"); if (ofi) { S.ovFS.i = +ofi.dataset.ovfsi; return renderOvFS(); }
   const opn = t.closest("[data-ovpan]"); if (opn) { const { a, b } = ovView(); return ovZoomTo(a + (b - a) / 2 * +opn.dataset.ovpan, b + (b - a) / 2 * +opn.dataset.ovpan, true); }
